@@ -27,10 +27,11 @@ export class SocketClient {
     if (this.socket?.connected) return Promise.resolve();
 
     return new Promise((resolve, reject) => {
-      const serverUrl =
+      let serverUrl =
         (typeof import.meta !== 'undefined' &&
           (import.meta as unknown as { env?: { VITE_SERVER_URL?: string } }).env?.VITE_SERVER_URL) ||
         undefined;
+      if (serverUrl && !/^https?:\/\//.test(serverUrl)) serverUrl = `https://${serverUrl}`;
       const socket: TypedSocket = io(serverUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
