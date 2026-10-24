@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(packages/**)",
+      "Write(apps/**)",
+      "Write(.devin/**)",
+      "Write(package.json)",
+      "Write(tsconfig.base.json)",
+      "Write(.gitignore)",
+      "Write(README.md)",
+      "Write(render.yaml)",
+      "Exec(npm)",
+      "Exec(npx)",
+      "Exec(node)",
+      "Exec(git status)",
+      "Exec(git diff)",
+      "Exec(git log)"
+    ],
+    "deny": [
+      "Exec(rm -rf)",
+      "Exec(sudo)",
+      "Write(.env*)"
+    ]
+  }
+}
