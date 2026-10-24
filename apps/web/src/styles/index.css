@@ -463,3 +463,53 @@ body, html {
   border-radius: 50%;
   animation: spin 0.85s linear infinite;
 }
+
+/* ── Mobile Touch Controls & Responsiveness ────────────────────────────── */
+.touch-control {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .cockpit-bracket-tl,
+  .cockpit-bracket-tr,
+  .cockpit-bracket-bl,
+  .cockpit-bracket-br {
+    width: 20px;
+    height: 20px;
+    top: 6px;
+    bottom: 6px;
+    left: 6px;
+    right: 6px;
+    opacity: 0.35;
+  }
+
+  .keyboard-hints-bar {
+    display: none !important;
+  }
+
+  .hud-heading-box {
+    display: none !important;
+  }
+
+  .hud-killfeed {
+    display: none !important;
+  }
+
+  .hud-status-panel {
+    width: auto !important;
+    max-width: 175px !important;
+    padding: 8px 12px !important;
+    margin-bottom: 145px !important;
+    font-size: 10px !important;
+  }
+
+  .hud-radar-panel {
+    padding: 6px !important;
+    margin-bottom: 175px !important;
+  }
+}
+
+

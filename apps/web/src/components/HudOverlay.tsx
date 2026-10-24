@@ -110,8 +110,16 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
     }
   }
 
-  // Tactical Radar Dimensions
-  const radarSize = 130;
+  // Tactical Radar Dimensions (responsive for mobile)
+  const [windowWidth, setWindowWidth] = React.useState(
+    typeof window !== 'undefined' ? window.innerWidth : 1024
+  );
+  React.useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  const radarSize = windowWidth < 640 ? 84 : 130;
   const scaleX = radarSize / ARENA_WIDTH;
   const scaleY = radarSize / ARENA_HEIGHT;
 
@@ -142,7 +150,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         }}
       >
         {/* ── TOP BAR: Match Status & Compass ────────────────────────────── */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="hud-top-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           {/* Top Left: Players Left, Timer, Kills */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, pointerEvents: 'auto' }}>
             <div
@@ -196,7 +204,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
           {/* Top Center: Heading & Alerts */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
             <div
-              className="cockpit-panel"
+              className="cockpit-panel hud-heading-box"
               style={{
                 padding: '4px 14px',
                 display: 'flex',
@@ -290,7 +298,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
             </div>
 
             {/* Live Kill Feed */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 260 }}>
+            <div className="hud-killfeed" style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 260 }}>
               {snapshot.killFeed.slice(-3).map((k) => (
                 <div
                   key={k.id}
@@ -317,10 +325,11 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           {/* Bottom Left: Hull, Shield & Boost */}
           <div
-            className="cockpit-panel"
+            className="cockpit-panel hud-status-panel"
             style={{
               padding: '14px 18px',
               width: 290,
+              minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
               gap: 10,
@@ -417,7 +426,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
           {/* Bottom Center: Controls Quick Reminder */}
           <div
-            className="cockpit-weapon-card"
+            className="cockpit-weapon-card keyboard-hints-bar"
             style={{
               padding: '10px 20px',
               display: 'flex',
@@ -444,7 +453,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
 
           {/* Bottom Right: Minimap Radar */}
           <div
-            className="cockpit-panel"
+            className="cockpit-panel hud-radar-panel"
             style={{
               padding: 10,
               display: 'flex',

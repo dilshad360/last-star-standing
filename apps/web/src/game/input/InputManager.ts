@@ -8,6 +8,7 @@ import { soundManager } from '../audio/SoundManager.js';
  * W / S: Main forward thruster / reverse retro-braking thruster.
  * Space: Dual wing laser blasters.
  * Shift: Afterburner speed boost.
+ * Also supports on-screen touch joystick, fire, and boost controls for mobile.
  */
 export class InputManager {
   private keys = new Set<string>();
@@ -15,17 +16,16 @@ export class InputManager {
   private lastUpdateTime = performance.now();
   private touchJoystick: { x: number; y: number; active: boolean } = { x: 0, y: 0, active: false };
   private touchFire = false;
+  private touchBoost = false;
   private sequence = 0;
   private emitTimer: ReturnType<typeof setInterval> | null = null;
   private onInput: ((input: PlayerInput) => void) | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private cleanupSoundInit: (() => void) | null = null;
 
   constructor() {
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
-    this.handleTouchStart = this.handleTouchStart.bind(this);
-    this.handleTouchMove = this.handleTouchMove.bind(this);
-    this.handleTouchEnd = this.handleTouchEnd.bind(this);
   }
 
   attach(canvas: HTMLCanvasElement, onInput: (input: PlayerInput) => void): void {
@@ -39,21 +39,19 @@ export class InputManager {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
 
-    // Touch (mobile fallback)
-    canvas.addEventListener('touchstart', this.handleTouchStart, { passive: false });
-    canvas.addEventListener('touchmove', this.handleTouchMove, { passive: false });
-    canvas.addEventListener('touchend', this.handleTouchEnd);
-    canvas.addEventListener('touchcancel', this.handleTouchEnd);
-
-    // Initialize sound on first user interaction
+    // Initialize sound on first user interaction (pointer/touch/key)
     const initSound = () => {
       soundManager.init();
       soundManager.resume();
       window.removeEventListener('keydown', initSound);
-      canvas.removeEventListener('touchstart', initSound);
+      window.removeEventListener('pointerdown', initSound);
     };
     window.addEventListener('keydown', initSound);
-    canvas.addEventListener('touchstart', initSound);
+    window.addEventListener('pointerdown', initSound);
+    this.cleanupSoundInit = () => {
+      window.removeEventListener('keydown', initSound);
+      window.removeEventListener('pointerdown', initSound);
+    };
 
     // Emit inputs at 30 Hz
     this.emitTimer = setInterval(() => this.emitInput(), 33);
@@ -66,17 +64,16 @@ export class InputManager {
     }
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
-    if (this.canvas) {
-      this.canvas.removeEventListener('touchstart', this.handleTouchStart);
-      this.canvas.removeEventListener('touchmove', this.handleTouchMove);
-      this.canvas.removeEventListener('touchend', this.handleTouchEnd);
-      this.canvas.removeEventListener('touchcancel', this.handleTouchEnd);
+    if (this.cleanupSoundInit) {
+      this.cleanupSoundInit();
+      this.cleanupSoundInit = null;
     }
     this.canvas = null;
     this.onInput = null;
     this.keys.clear();
     this.touchJoystick = { x: 0, y: 0, active: false };
     this.touchFire = false;
+    this.touchBoost = false;
   }
 
   /** Update camera position (retained for interface compatibility). */
@@ -84,19 +81,34 @@ export class InputManager {
     // No-op without mouse aim
   }
 
+  /** Set touch virtual joystick offset (-radius to +radius). */
+  setTouchJoystick(x: number, y: number, active: boolean): void {
+    this.touchJoystick = { x, y, active };
+  }
+
+  /** Set mobile fire button state. */
+  setTouchFire(active: boolean): void {
+    this.touchFire = active;
+  }
+
+  /** Set mobile boost button state. */
+  setTouchBoost(active: boolean): void {
+    this.touchBoost = active;
+  }
+
   /** Current facing angle of the ship in radians based on directional WASD inputs. */
   getFacingAngle(): number {
     return this.facingAngle;
   }
 
-  /** Check if Afterburner Boost is active (Shift key held). */
+  /** Check if Afterburner Boost is active (Shift key or mobile boost button held). */
   isBoosting(): boolean {
-    return this.keys.has('shift');
+    return this.keys.has('shift') || this.touchBoost;
   }
 
   /** Check if Flight Assist / Space Drift is active. */
   isDrifting(): boolean {
-    return this.keys.has('shift');
+    return this.keys.has('shift') || this.touchBoost;
   }
 
   /** Get current input state for local prediction. */
@@ -134,49 +146,6 @@ export class InputManager {
     }
   }
 
-  private handleTouchStart(e: TouchEvent): void {
-    e.preventDefault();
-    const rect = this.canvas!.getBoundingClientRect();
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const touch = e.changedTouches[i]!;
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      // Left half = joystick, right half = fire
-      if (x < rect.width / 2) {
-        this.touchJoystick = { x: x - rect.width / 4, y: y - rect.height * 0.75, active: true };
-      } else {
-        this.touchFire = true;
-      }
-    }
-  }
-
-  private handleTouchMove(e: TouchEvent): void {
-    e.preventDefault();
-    const rect = this.canvas!.getBoundingClientRect();
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const touch = e.changedTouches[i]!;
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      if (this.touchJoystick.active && x < rect.width / 2) {
-        this.touchJoystick.x = x - rect.width / 4;
-        this.touchJoystick.y = y - rect.height * 0.75;
-      }
-    }
-  }
-
-  private handleTouchEnd(e: TouchEvent): void {
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const touch = e.changedTouches[i]!;
-      const rect = this.canvas!.getBoundingClientRect();
-      const x = touch.clientX - rect.left;
-      if (x < rect.width / 2) {
-        this.touchJoystick.active = false;
-      } else {
-        this.touchFire = false;
-      }
-    }
-  }
-
   // ── Input building & emission ─────────────────────────────────────────────
 
   public update(dtSeconds?: number): void {
@@ -194,11 +163,14 @@ export class InputManager {
       this.facingAngle += SHIP_TURN_SPEED * dt;
     }
 
+    // Touch joystick analog turning
     if (this.touchJoystick.active) {
-      if (this.touchJoystick.x < -18) {
-        this.facingAngle -= SHIP_TURN_SPEED * dt;
-      } else if (this.touchJoystick.x > 18) {
-        this.facingAngle += SHIP_TURN_SPEED * dt;
+      if (this.touchJoystick.x < -10) {
+        const factor = Math.min(1, Math.abs(this.touchJoystick.x) / 40);
+        this.facingAngle -= SHIP_TURN_SPEED * factor * dt;
+      } else if (this.touchJoystick.x > 10) {
+        const factor = Math.min(1, Math.abs(this.touchJoystick.x) / 40);
+        this.facingAngle += SHIP_TURN_SPEED * factor * dt;
       }
     }
 
@@ -218,14 +190,14 @@ export class InputManager {
 
     // Mobile touch joystick
     const touchActive = this.touchJoystick.active;
-    const touchThreshold = 20;
-    const joystickForward = touchActive && this.touchJoystick.y < -touchThreshold;
-    const joystickReverse = touchActive && this.touchJoystick.y > touchThreshold;
-    const joystickLeft = touchActive && this.touchJoystick.x < -touchThreshold;
-    const joystickRight = touchActive && this.touchJoystick.x > touchThreshold;
+    const touchDeadzone = 10;
+    const joystickForward = touchActive && this.touchJoystick.y < -touchDeadzone;
+    const joystickReverse = touchActive && this.touchJoystick.y > touchDeadzone;
+    const joystickLeft = touchActive && this.touchJoystick.x < -touchDeadzone;
+    const joystickRight = touchActive && this.touchJoystick.x > touchDeadzone;
 
     const shooting = this.keys.has(' ') || this.keys.has('space') || this.touchFire;
-    const boost = this.keys.has('shift');
+    const boost = this.keys.has('shift') || this.touchBoost;
 
     return {
       up: forward || joystickForward,

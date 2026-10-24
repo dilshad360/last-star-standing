@@ -196,7 +196,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
         </div>
 
         {/* Content: Pilots List (Left) & QR Code / Match Settings (Right) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
           {/* Left Column: Connected Players */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 12, alignItems: 'center' }}>
@@ -345,7 +345,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   display: 'inline-block',
                 }}
               >
-                <QrCodeSvg value={shareUrl} size={190} />
+                <QrCodeSvg
+                  value={shareUrl}
+                  size={typeof window !== 'undefined' && window.innerWidth < 480 ? 150 : 190}
+                />
               </div>
 
               {/* Direct clickable URL with auto-copy */}

@@ -60,6 +60,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         justifyContent: 'center',
         background: 'radial-gradient(ellipse at center, #09122c 0%, #03050e 100%)',
         padding: 16,
+        overflowY: 'auto',
         zIndex: 20,
       }}
     >
@@ -71,11 +72,20 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       <div className="cockpit-bracket-br" />
 
       {/* Top action controls: Sound & Help */}
-      <div style={{ position: 'absolute', top: 20, right: 24, display: 'flex', gap: 12, zIndex: 10 }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 'max(14px, env(safe-area-inset-top, 14px))',
+          right: 'max(16px, env(safe-area-inset-right, 16px))',
+          display: 'flex',
+          gap: 10,
+          zIndex: 10,
+        }}
+      >
         <button
           onClick={() => setShowControls(true)}
           className="btn-neon-outline"
-          style={{ padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
           title="View Flight Controls"
         >
           <HelpCircleIcon size={14} />
@@ -84,30 +94,30 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         <button
           onClick={onToggleMute}
           className="btn-neon-outline"
-          style={{ padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
         >
           {muted ? <VolumeXIcon size={14} /> : <Volume2Icon size={14} />}
-          {muted ? 'Muted' : 'Sound On'}
+          {muted ? 'Muted' : 'Sound'}
         </button>
       </div>
 
       {/* Main Brand Logo Header */}
-      <div style={{ textAlign: 'center', marginBottom: 24, zIndex: 10 }}>
+      <div style={{ textAlign: 'center', marginBottom: 20, zIndex: 10, marginTop: 'auto' }}>
         <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 3, fontWeight: 'bold', marginBottom: 6 }}>
           2D MULTIPLAYER SPACE BATTLE ROYALE
         </div>
         <h1
           className="title-glow"
           style={{
-            fontSize: 'clamp(28px, 6vw, 46px)',
+            fontSize: 'clamp(26px, 7vw, 46px)',
             margin: '0 0 6px 0',
             fontWeight: 900,
           }}
         >
           LAST STAR STANDING
         </h1>
-        <div style={{ fontSize: 13, color: '#94a3b8' }}>
-          Steer with A/D · Accelerate with W/S · Shoot with Space · Boost with Shift
+        <div style={{ fontSize: 12, color: '#94a3b8' }}>
+          Steer with A/D · Thrust with W/S · Space to Shoot · On-screen controls on Mobile
         </div>
       </div>
 
@@ -116,12 +126,13 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         className="cockpit-panel-glow"
         style={{
           width: '100%',
-          maxWidth: 440,
-          padding: '24px 28px',
+          maxWidth: 'min(440px, 94vw)',
+          padding: '22px 24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 18,
+          gap: 16,
           zIndex: 10,
+          marginBottom: 'auto',
         }}
       >
         {/* Pilot Name Input */}

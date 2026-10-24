@@ -100,7 +100,7 @@ const LERP_FACTOR = 0.2;
  * snapshot interpolation, weapons physics, and cockpit avionics crosshairs.
  */
 export class ArenaScene extends Phaser.Scene {
-  private inputManager!: InputManager;
+  public inputManager!: InputManager;
   private localPlayerId: string | null = null;
   private ships = new Map<string, InterpolatedShip>();
   private projectiles = new Map<string, InterpolatedProjectile>();

@@ -17,6 +17,7 @@ import { HudOverlay } from './components/HudOverlay.js';
 import { EliminatedOverlay } from './components/EliminatedOverlay.js';
 import { WinnerScreen } from './components/WinnerScreen.js';
 import { ConnectionBanner } from './components/ConnectionBanner.js';
+import { TouchControls } from './components/TouchControls.js';
 
 import './styles/index.css';
 
@@ -65,11 +66,16 @@ export default function App() {
     localStorage.setItem('lss_pilot_name', name);
   };
 
-  // Check URL query parameters for initial ?room=CODE
+  // Check if URL query parameters for initial ?room=CODE
   const initialRoomCode = (() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('room') || '';
   })();
+
+  // Detect touch-capable devices (mobile phones, tablets, or touch emulation)
+  const isTouchDevice =
+    typeof window !== 'undefined' &&
+    ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   // Pre-warm socket connection in the background so matchmaking is instant
   useEffect(() => {
@@ -395,6 +401,22 @@ export default function App() {
             muted={muted}
             onToggleMute={toggleMute}
           />
+
+          {/* Mobile Virtual Controls */}
+          {isTouchDevice && (
+            <TouchControls
+              visible={!eliminatedInfo && !!localPlayerState?.alive}
+              onJoystick={(x, y, active) => {
+                phaserGame.scene?.inputManager?.setTouchJoystick(x, y, active);
+              }}
+              onFire={(active) => {
+                phaserGame.scene?.inputManager?.setTouchFire(active);
+              }}
+              onBoost={(active) => {
+                phaserGame.scene?.inputManager?.setTouchBoost(active);
+              }}
+            />
+          )}
 
           {/* Eliminated Spectator Overlay */}
           {eliminatedInfo && (
