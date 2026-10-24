@@ -476,14 +476,9 @@ body, html {
   .cockpit-bracket-tl,
   .cockpit-bracket-tr,
   .cockpit-bracket-bl,
-  .cockpit-bracket-br {
-    width: 20px;
-    height: 20px;
-    top: 6px;
-    bottom: 6px;
-    left: 6px;
-    right: 6px;
-    opacity: 0.35;
+  .cockpit-bracket-br,
+  .cockpit-visor-frame {
+    display: none !important;
   }
 
   .keyboard-hints-bar {
@@ -496,19 +491,6 @@ body, html {
 
   .hud-killfeed {
     display: none !important;
-  }
-
-  .hud-status-panel {
-    width: auto !important;
-    max-width: 175px !important;
-    padding: 8px 12px !important;
-    margin-bottom: 145px !important;
-    font-size: 10px !important;
-  }
-
-  .hud-radar-panel {
-    padding: 6px !important;
-    margin-bottom: 175px !important;
   }
 }
 

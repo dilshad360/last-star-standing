@@ -9,6 +9,8 @@ import {
   UserPlusIcon,
   BotIcon,
   UsersIcon,
+  MaximizeIcon,
+  MinimizeIcon,
 } from './icons.js';
 
 interface LandingScreenProps {
@@ -41,6 +43,23 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'quick' | 'custom'>(initialRoomCode ? 'custom' : 'quick');
   const [quickBots, setQuickBots] = useState(5);
 
+  const [isFullscreen, setIsFullscreen] = React.useState(
+    typeof document !== 'undefined' ? !!document.fullscreenElement : false
+  );
+  React.useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const code = joinCode.trim().toUpperCase();
@@ -71,30 +90,39 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       <div className="cockpit-bracket-bl" />
       <div className="cockpit-bracket-br" />
 
-      {/* Top action controls: Sound & Help */}
+      {/* Top action controls: Fullscreen, Sound & Help */}
       <div
         style={{
           position: 'absolute',
           top: 'max(14px, env(safe-area-inset-top, 14px))',
           right: 'max(16px, env(safe-area-inset-right, 16px))',
           display: 'flex',
-          gap: 10,
+          gap: 8,
           zIndex: 10,
         }}
       >
         <button
+          onClick={toggleFullscreen}
+          className="btn-neon-outline"
+          style={{ padding: '5px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+          title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+        >
+          {isFullscreen ? <MinimizeIcon size={14} /> : <MaximizeIcon size={14} />}
+          {isFullscreen ? 'Exit' : 'Full'}
+        </button>
+        <button
           onClick={() => setShowControls(true)}
           className="btn-neon-outline"
-          style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '5px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
           title="View Flight Controls"
         >
           <HelpCircleIcon size={14} />
-          How to Play
+          Controls
         </button>
         <button
           onClick={onToggleMute}
           className="btn-neon-outline"
-          style={{ padding: '5px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '5px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
         >
           {muted ? <VolumeXIcon size={14} /> : <Volume2Icon size={14} />}
           {muted ? 'Muted' : 'Sound'}
