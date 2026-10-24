@@ -67,6 +67,8 @@ interface InterpolatedProjectile {
   y: number;
   targetX: number;
   targetY: number;
+  velocityX: number;
+  velocityY: number;
   graphics: Phaser.GameObjects.Container;
 }
 
@@ -329,6 +331,8 @@ export class ArenaScene extends Phaser.Scene {
       }
       interpolated.targetX = proj.x;
       interpolated.targetY = proj.y;
+      interpolated.velocityX = proj.velocityX;
+      interpolated.velocityY = proj.velocityY;
     }
     for (const [id, proj] of this.projectiles) {
       if (!seenProjectiles.has(id)) {
@@ -808,8 +812,10 @@ export class ArenaScene extends Phaser.Scene {
     const colorHex = isMeteor ? NEON.meteor : NEON.projectile;
     const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
 
+    const angle = Math.atan2(proj.velocityY, proj.velocityX);
     const container = this.add.container(proj.x, proj.y);
     container.setDepth(12);
+    container.setRotation(angle);
 
     if (isMeteor) {
       // Meteor fireball with pulsing glow
@@ -818,9 +824,9 @@ export class ArenaScene extends Phaser.Scene {
       core.setStrokeStyle(2, color, 1);
       container.add([glow, core]);
     } else {
-      // Sleek, thin, elongated energy laser bolt (length 26px, width 3.5px)
-      const glow = this.add.ellipse(0, 0, 28, 6.5, color, 0.4);
-      const core = this.add.ellipse(0, 0, 24, 2.5, 0xffffff, 1.0);
+      // Sleek, thin, elongated energy laser bolt (length 26px along flight axis, width 3.5px)
+      const glow = this.add.ellipse(0, 0, 26, 6.5, color, 0.45);
+      const core = this.add.ellipse(0, 0, 22, 2.8, 0xffffff, 1.0);
       container.add([glow, core]);
     }
 
@@ -830,6 +836,8 @@ export class ArenaScene extends Phaser.Scene {
       y: proj.y,
       targetX: proj.x,
       targetY: proj.y,
+      velocityX: proj.velocityX,
+      velocityY: proj.velocityY,
       graphics: container,
     };
   }
@@ -1209,16 +1217,18 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private interpolateProjectiles(delta: number): void {
-    const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
+    const dt = delta / 1000;
     for (const proj of this.projectiles.values()) {
-      const dx = proj.targetX - proj.x;
-      const dy = proj.targetY - proj.y;
-      if (Math.hypot(dx, dy) > 0.01) {
-        proj.graphics.setRotation(Math.atan2(dy, dx));
-      }
-      proj.x = Phaser.Math.Linear(proj.x, proj.targetX, factor);
-      proj.y = Phaser.Math.Linear(proj.y, proj.targetY, factor);
+      // Advance at true physical speed without delay
+      proj.x += proj.velocityX * dt;
+      proj.y += proj.velocityY * dt;
+
+      // Softly reconcile towards authoritative server position
+      proj.x = Phaser.Math.Linear(proj.x, proj.targetX, 0.25);
+      proj.y = Phaser.Math.Linear(proj.y, proj.targetY, 0.25);
+
       proj.graphics.setPosition(proj.x, proj.y);
+      proj.graphics.setRotation(Math.atan2(proj.velocityY, proj.velocityX));
     }
   }
 

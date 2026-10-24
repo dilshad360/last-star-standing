@@ -63,10 +63,12 @@ export class SocketClient {
       socket.on('match:started', (payload: { snapshot: GameSnapshot }) => gameEvents.emit('match:started', payload));
       socket.on('game:snapshot', (snapshot: GameSnapshot) => {
         gameEvents.emit('snapshot:update', snapshot);
-        // Estimate one-way latency from the embedded server clock.
+        // Estimate network latency from the wall-clock server timestamp
+        const diff = Date.now() - snapshot.serverTime;
+        const latencyMs = Math.max(1, Math.min(999, Math.round(diff)));
         gameEvents.emit('connection:status', {
           connected: true,
-          latencyMs: Math.max(0, Date.now() - snapshot.serverTime),
+          latencyMs,
         });
       });
       socket.on('player:eliminated', (entry: KillFeedEntry) => gameEvents.emit('player:eliminated', entry));

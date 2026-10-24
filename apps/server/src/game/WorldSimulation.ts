@@ -482,13 +482,14 @@ export class WorldSimulation implements MatchSimulation {
 
       const cos = Math.cos(ship.rotation);
       const sin = Math.sin(ship.rotation);
+      // Dual wing laser blasters (left: local x=10, y=-13; right: local x=10, y=+13)
       const forwardOffset = 10;
-      const wingOffset = 13; // Distance from centerline to left/right blaster
+      const wingOffset = 13;
 
-      // Left wing laser blaster
+      // Left wing blaster cannon
       const id1 = `proj-${++this.projectileSeq}`;
-      const leftX = ship.x + cos * forwardOffset - sin * wingOffset;
-      const leftY = ship.y + sin * forwardOffset + cos * wingOffset;
+      const leftX = ship.x + cos * forwardOffset + sin * wingOffset;
+      const leftY = ship.y + sin * forwardOffset - cos * wingOffset;
       this.projectiles.set(id1, {
         id: id1,
         ownerId: ship.id,
@@ -500,10 +501,10 @@ export class WorldSimulation implements MatchSimulation {
         expiresAt: this.now + PROJECTILE_LIFETIME_MS,
       });
 
-      // Right wing laser blaster
+      // Right wing blaster cannon
       const id2 = `proj-${++this.projectileSeq}`;
-      const rightX = ship.x + cos * forwardOffset + sin * wingOffset;
-      const rightY = ship.y + sin * forwardOffset - cos * wingOffset;
+      const rightX = ship.x + cos * forwardOffset - sin * wingOffset;
+      const rightY = ship.y + sin * forwardOffset + cos * wingOffset;
       this.projectiles.set(id2, {
         id: id2,
         ownerId: ship.id,
@@ -1038,7 +1039,7 @@ export class WorldSimulation implements MatchSimulation {
     const elapsed = this.elapsedMs;
     return {
       tick: this.tickCount,
-      serverTime: this.now,
+      serverTime: Date.now(),
       status: this.finished ? 'FINISHED' : 'ACTIVE',
       matchElapsedMs: elapsed,
       timeRemainingMs: Math.max(0, MATCH_TIMEOUT_MS - elapsed),
