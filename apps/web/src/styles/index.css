@@ -444,3 +444,22 @@ body, html {
   box-shadow: 0 0 8px #f43f5e;
   border-color: #fb7185;
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+.cockpit-loader-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid rgba(56, 189, 248, 0.2);
+  border-top: 3px solid #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+}

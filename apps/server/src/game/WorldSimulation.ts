@@ -617,19 +617,23 @@ export class WorldSimulation implements MatchSimulation {
         const cos = Math.cos(ship.rotation);
         const sin = Math.sin(ship.rotation);
 
-        // Forward cockpit circle (radius 11)
-        const noseX = ship.x + cos * 7;
-        const noseY = ship.y + sin * 7;
-        const noseHit = 11 + radius;
+        // Projectile ↔ ship (precision 3-circle swept capsule matching visual dart hull).
+        const noseX = ship.x + cos * 12;
+        const noseY = ship.y + sin * 12;
+        const noseHit = 6.5 + radius;
         const hitNose = this.distToSegmentSq(noseX, noseY, prevX, prevY, currX, currY) <= noseHit * noseHit;
 
-        // Aft wing root circle (radius 14)
-        const aftX = ship.x - cos * 6;
-        const aftY = ship.y - sin * 6;
-        const aftHit = 14 + radius;
+        const midX = ship.x + cos * 1;
+        const midY = ship.y + sin * 1;
+        const midHit = 9.5 + radius;
+        const hitMid = this.distToSegmentSq(midX, midY, prevX, prevY, currX, currY) <= midHit * midHit;
+
+        const aftX = ship.x - cos * 8;
+        const aftY = ship.y - sin * 8;
+        const aftHit = 12.5 + radius;
         const hitAft = this.distToSegmentSq(aftX, aftY, prevX, prevY, currX, currY) <= aftHit * aftHit;
 
-        if (!hitNose && !hitAft) continue;
+        if (!hitNose && !hitMid && !hitAft) continue;
 
         const cause: EliminationCause = isMeteor ? 'METEOR' : 'PROJECTILE';
         this.applyDamage(ship, projectile.damage, {

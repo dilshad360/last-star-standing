@@ -122,7 +122,9 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   init(data: { localPlayerId?: string }): void {
-    this.localPlayerId = data.localPlayerId ?? null;
+    if (data?.localPlayerId) {
+      this.localPlayerId = data.localPlayerId;
+    }
     this.inputManager = new InputManager();
   }
 
@@ -210,13 +212,22 @@ export class ArenaScene extends Phaser.Scene {
     // Detach DOM listeners and EventBus subs on every scene restart/shutdown.
     this.events.once('shutdown', this.shutdown, this);
 
-    // Camera setup
+    // Camera setup - center immediately on arena center to avoid void in top-left
     this.cameras.main.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
     this.cameras.main.setZoom(0.8);
+    this.cameras.main.centerOn(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+    if (this.localPlayerId && this.ships.has(this.localPlayerId)) {
+      const localShip = this.ships.get(this.localPlayerId)!;
+      this.cameras.main.centerOn(localShip.x, localShip.y);
+    }
   }
 
   setLocalPlayerId(id: string | null): void {
     this.localPlayerId = id;
+    if (id && this.ships.has(id)) {
+      const ship = this.ships.get(id)!;
+      this.cameras.main.centerOn(ship.x, ship.y);
+    }
   }
 
   update(time: number, delta: number): void {
@@ -284,6 +295,17 @@ export class ArenaScene extends Phaser.Scene {
       ship.targetRotation = player.rotation;
       ship.lastUpdate = now;
       this.updateShipVisuals(ship, player);
+    }
+
+    // Snap camera to local ship as soon as it appears
+    if (this.localPlayerId && this.ships.has(this.localPlayerId)) {
+      const myShip = this.ships.get(this.localPlayerId)!;
+      const cam = this.cameras.main;
+      const camX = cam.scrollX + cam.width / 2;
+      const camY = cam.scrollY + cam.height / 2;
+      if (Math.hypot(camX - myShip.x, camY - myShip.y) > 900) {
+        cam.centerOn(myShip.x, myShip.y);
+      }
     }
 
     // Clean up removed/disconnected ships
@@ -1128,16 +1150,6 @@ export class ArenaScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => ring.destroy(),
     });
-
-    // Impactful camera shake on explosion
-    const cam = this.cameras.main;
-    const camX = cam.scrollX + cam.width / 2;
-    const camY = cam.scrollY + cam.height / 2;
-    const dist = Math.hypot(x - camX, y - camY);
-    if (dist < 1400) {
-      const intensity = Math.max(0.006, 0.024 * (1 - dist / 1400));
-      cam.shake(260, intensity);
-    }
   }
 
   // ── EMP Blast Shockwave ────────────────────────────────────────────────────
@@ -1171,16 +1183,6 @@ export class ArenaScene extends Phaser.Scene {
       ease: 'Quad.easeOut',
       onComplete: () => ringInner.destroy(),
     });
-
-    // 2. High-energy camera shake
-    const cam = this.cameras.main;
-    const camX = cam.scrollX + cam.width / 2;
-    const camY = cam.scrollY + cam.height / 2;
-    const dist = Math.hypot(x - camX, y - camY);
-    if (dist < 1800) {
-      const intensity = Math.max(0.012, 0.03 * (1 - dist / 1800));
-      cam.shake(360, intensity);
-    }
   }
 
   // ── Interpolation & Local Prediction ──────────────────────────────────────
@@ -1288,8 +1290,6 @@ export class ArenaScene extends Phaser.Scene {
     socketClient.sendInput(input);
     if (input.shooting) {
       soundManager.playLaser();
-      // Physical weapon recoil micro-shake on cockpit camera
-      this.cameras.main.shake(50, 0.002);
     }
   }
 

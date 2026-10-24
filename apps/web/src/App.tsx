@@ -276,6 +276,7 @@ export default function App() {
     setResult(null);
     setCountdown(null);
     setEliminatedInfo(null);
+    setSnapshot(null);
     if (isHost) {
       try {
         await socketClient.restartMatch();
@@ -290,6 +291,7 @@ export default function App() {
   const handleReturnToLanding = () => {
     setResult(null);
     setEliminatedInfo(null);
+    setSnapshot(null);
     setScreen('landing');
     socketClient.disconnect();
     mountedRef.current = false;
@@ -350,6 +352,35 @@ export default function App() {
       {screen === 'playing' && (
         <>
           <div ref={canvasRef} style={{ width: '100%', height: '100%' }} />
+
+          {/* Pre-flight Orbital Drop Cockpit Loader */}
+          {(!snapshot || !localPlayerState) && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(3, 5, 14, 0.95)',
+                backdropFilter: 'blur(10px)',
+                zIndex: 35,
+                color: '#38bdf8',
+                fontFamily: 'monospace',
+                gap: 16,
+              }}
+            >
+              <div className="cockpit-visor-frame" />
+              <div className="cockpit-loader-spinner" />
+              <div style={{ fontSize: 14, fontWeight: 'bold', letterSpacing: 2 }}>
+                LAUNCHING ORBITAL COCKPIT…
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Calibrating thruster avionics & radar telemetry
+              </div>
+            </div>
+          )}
 
           {/* Live HUD Overlay */}
           <HudOverlay

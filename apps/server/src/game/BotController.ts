@@ -25,12 +25,13 @@ const KEY_THRESHOLD = 0.3;
 const EDGE_MARGIN = 200;
 const ZONE_MARGIN = 120;
 const ASTEROID_AVOID_RANGE = 160;
-const ENGAGE_RANGE = 620;
-const FIRE_RANGE = 480;
-const ORBIT_DISTANCE = 340;
-const PICKUP_SEEK_RANGE = 650;
-const PICKUP_SEEK_RANGE_HURT = 900;
+const ENGAGE_RANGE = 520;
+const FIRE_RANGE = 380;
+const ORBIT_DISTANCE = 320;
+const PICKUP_SEEK_RANGE = 750;
+const PICKUP_SEEK_RANGE_HURT = 1000;
 const ASTEROID_FARM_RANGE = 800;
+const EARLY_GAME_DURATION_MS = 14_000;
 
 /**
  * Server-side AI Bot Pilot. Emits the exact same `PlayerInput` contract as a
@@ -41,12 +42,15 @@ export class BotController {
   private sequence = 0;
   private readonly orbitSign: 1 | -1;
   private readonly aimNoise: number;
+  private matchStartTime: number | null = null;
+  private burstCount = 0;
+  private burstCooldownUntil = 0;
 
   constructor(private readonly rng: () => number = Math.random) {
     this.orbitSign = rng() < 0.5 ? -1 : 1;
     // Per-bot static aim bias gives each pilot a personality; per-shot jitter
     // in decide() keeps them beatable instead of perfectly lethal.
-    this.aimNoise = (rng() - 0.5) * 0.15;
+    this.aimNoise = (rng() - 0.5) * 0.22;
   }
 
   decide(self: ShipState, view: BotView): PlayerInput {
@@ -96,22 +100,42 @@ export class BotController {
     );
     const enemyDist = enemy ? this.distance(self.x, self.y, enemy.x, enemy.y) : Infinity;
 
-    if (pickup && (hurt || enemyDist > ENGAGE_RANGE * 0.6)) {
+    if (this.matchStartTime === null) {
+      this.matchStartTime = view.now;
+    }
+    const matchElapsed = view.now - this.matchStartTime;
+    const isEarlyGame = matchElapsed < EARLY_GAME_DURATION_MS;
+
+    if (pickup && (hurt || isEarlyGame || enemyDist > ENGAGE_RANGE * 0.5)) {
       const steer = this.steerToward(self.x, self.y, pickup.x, pickup.y, 1.4);
       moveX += steer.x;
       moveY += steer.y;
     }
 
-    if (enemy && enemyDist <= ENGAGE_RANGE) {
-      // Lead the target by the projectile's time of flight.
+    const effectiveEngageRange = isEarlyGame ? 280 : ENGAGE_RANGE;
+    if (enemy && enemyDist <= effectiveEngageRange) {
+      // Lead the target by the projectile's time of flight with human-like latency jitter.
       const flightTime = enemyDist / PROJECTILE_SPEED;
       const targetX = enemy.x + enemy.velocityX * flightTime;
       const targetY = enemy.y + enemy.velocityY * flightTime;
+      const jitter = isEarlyGame ? 0.75 : 0.45;
       aimAngle =
         Math.atan2(targetY - self.y, targetX - self.x) +
         this.aimNoise +
-        (this.rng() - 0.5) * 0.5;
-      shooting = enemyDist <= FIRE_RANGE;
+        (this.rng() - 0.5) * jitter;
+
+      // Burst firing cadence: 2-3 shots then reposition pause
+      const effectiveFireRange = isEarlyGame ? 240 : FIRE_RANGE;
+      if (enemyDist <= effectiveFireRange) {
+        if (view.now >= this.burstCooldownUntil) {
+          shooting = true;
+          this.burstCount++;
+          if (this.burstCount >= 3) {
+            this.burstCount = 0;
+            this.burstCooldownUntil = view.now + 650 + this.rng() * 600;
+          }
+        }
+      }
 
       // Hold a firing standoff: only close when far, back off when crowded,
       // and kite the opponent while hurt.

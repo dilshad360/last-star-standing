@@ -7,9 +7,14 @@ import { ArenaScene } from './scenes/ArenaScene.js';
  */
 export class PhaserGame {
   private game: Phaser.Game | null = null;
+  public currentLocalPlayerId: string | null = null;
 
   mount(parent: HTMLElement, localPlayerId?: string): void {
-    if (this.game) return;
+    this.currentLocalPlayerId = localPlayerId ?? null;
+    if (this.game) {
+      this.setLocalPlayerId(this.currentLocalPlayerId);
+      return;
+    }
 
     this.game = new Phaser.Game({
       type: Phaser.AUTO,
@@ -29,14 +34,18 @@ export class PhaserGame {
       },
     });
 
-    // Pass local player id once the scene boots
-    this.game.events.once(Phaser.Core.Events.READY, () => {
+    const setSceneId = () => {
       const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
-      scene?.setLocalPlayerId(localPlayerId ?? null);
-    });
+      if (scene) {
+        scene.setLocalPlayerId(this.currentLocalPlayerId);
+      }
+    };
+
+    this.game.events.once(Phaser.Core.Events.READY, setSceneId);
   }
 
   setLocalPlayerId(id: string | null): void {
+    this.currentLocalPlayerId = id;
     const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
     scene?.setLocalPlayerId(id);
   }
