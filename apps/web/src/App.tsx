@@ -71,6 +71,11 @@ export default function App() {
     return params.get('room') || '';
   })();
 
+  // Pre-warm socket connection in the background so matchmaking is instant
+  useEffect(() => {
+    socketClient.connect().catch(() => {});
+  }, []);
+
   // ── Global EventBus Subscriptions ──────────────────────────────────────────
   useEffect(() => {
     const offConn = gameEvents.on('connection:status', (status) => {
@@ -293,7 +298,7 @@ export default function App() {
     setEliminatedInfo(null);
     setSnapshot(null);
     setScreen('landing');
-    socketClient.disconnect();
+    void socketClient.leaveRoom();
     mountedRef.current = false;
     phaserGame.unmount();
   };
@@ -311,9 +316,9 @@ export default function App() {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* Toast and Connection Alerts */}
+      {/* Toast and Connection Alerts - only show disconnect alert when in an active room/match */}
       <ConnectionBanner
-        connected={connected}
+        connected={connected || screen === 'landing'}
         error={errorToast}
         onDismissError={() => setErrorToast(null)}
       />
