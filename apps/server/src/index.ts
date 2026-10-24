@@ -1,4 +1,5 @@
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import cors from 'cors';
 import express from 'express';
@@ -40,6 +41,19 @@ export function createGameServer(simulationFactory?: SimulationFactory): GameSer
       players: roomManager.playerCount,
       uptimeSeconds: Math.round(process.uptime()),
     });
+  });
+
+  app.get('/api/network', (_req, res) => {
+    const interfaces = os.networkInterfaces();
+    const ips: Array<{ name: string; ip: string }> = [];
+    for (const name of Object.keys(interfaces)) {
+      for (const net of interfaces[name] ?? []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          ips.push({ name, ip: net.address });
+        }
+      }
+    }
+    res.json({ ips });
   });
 
   io.on('connection', (socket) => registerSocketHandlers(socket, roomManager));

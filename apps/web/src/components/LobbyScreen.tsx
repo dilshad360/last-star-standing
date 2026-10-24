@@ -32,7 +32,34 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   const localPlayer = room.players.find((p) => p.id === localPlayerId);
   const isReady = localPlayer?.isReady ?? false;
 
-  const shareUrl = `${window.location.origin}/?room=${room.code}`;
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const [selectedHost, setSelectedHost] = useState(isLocalhost ? '10.10.19.145' : window.location.hostname);
+  const [availableIps, setAvailableIps] = useState<string[]>([
+    isLocalhost ? '10.10.19.145' : window.location.hostname,
+    '192.168.137.1',
+  ]);
+
+  useEffect(() => {
+    fetch('http://localhost:3001/api/network')
+      .then((res) => res.json())
+      .then((data: { ips?: Array<{ name: string; ip: string }> }) => {
+        if (data.ips && data.ips.length > 0) {
+          const list = data.ips.map((i) => i.ip);
+          setAvailableIps(list);
+          if (isLocalhost && !list.includes(selectedHost)) {
+            const wifi = list.find((ip) => ip.startsWith('10.'));
+            setSelectedHost(wifi ?? list[0]);
+          }
+        }
+      })
+      .catch(() => {
+        // Fallback already preset
+      });
+  }, [isLocalhost, selectedHost]);
+
+  const networkPort = window.location.port ? `:${window.location.port}` : '';
+  const networkOrigin = `${window.location.protocol}//${selectedHost}${networkPort}`;
+  const shareUrl = `${networkOrigin}/?room=${room.code}`;
 
   const copyLink = async () => {
     try {
@@ -293,25 +320,96 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
           {/* Right Column: QR Code & Match Controls */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Inline SVG QR Code Card for Mobile / Secondary Players */}
+            {/* High-visibility QR Code Card for Mobile / Secondary Players */}
             <div
               className="cockpit-panel"
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                padding: '16px',
+                padding: '18px 16px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1, marginBottom: 10, fontWeight: 600 }}>
-                SCAN TO JOIN ON PHONE
+              <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1.5, marginBottom: 12, fontWeight: 700 }}>
+                SCAN TO JOIN ON MOBILE
               </div>
-              <div style={{ padding: 8, background: '#040714', borderRadius: 4, border: '1px solid rgba(249, 115, 22, 0.3)' }}>
-                <QrCodeSvg value={shareUrl} size={140} fgColor="#f97316" bgColor="#040714" />
+
+              {/* High-contrast solid white frame without colored borders for instantaneous camera recognition */}
+              <div
+                style={{
+                  padding: 10,
+                  background: '#ffffff',
+                  borderRadius: 10,
+                  boxShadow: '0 0 24px rgba(34, 211, 238, 0.45), 0 8px 24px rgba(0, 0, 0, 0.7)',
+                  display: 'inline-block',
+                }}
+              >
+                <QrCodeSvg value={shareUrl} size={190} />
               </div>
+
+              {/* Direct clickable URL with auto-copy */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 12,
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  padding: '5px 12px',
+                  borderRadius: 4,
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  maxWidth: '100%',
+                }}
+              >
+                <a
+                  href={shareUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 12,
+                    color: '#38bdf8',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    letterSpacing: 0.5,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="Click to open or copy"
+                >
+                  {shareUrl}
+                </a>
+              </div>
+
+              {/* Network interface selector if multiple are available on host */}
+              {availableIps.length > 1 && isLocalhost && (
+                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
+                  <span>Host IP:</span>
+                  <select
+                    value={selectedHost}
+                    onChange={(e) => setSelectedHost(e.target.value)}
+                    style={{
+                      background: '#09122c',
+                      color: '#f8fafc',
+                      border: '1px solid rgba(255, 255, 255, 0.25)',
+                      borderRadius: 4,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {availableIps.map((ip) => (
+                      <option key={ip} value={ip}>
+                        {ip} {ip.startsWith('10.') ? '(Wi-Fi)' : ip.startsWith('192.168.137') ? '(Hotspot)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-                Or enter code: <strong style={{ color: '#f8fafc' }}>{room.code}</strong>
+                Or enter room code: <strong style={{ color: '#f8fafc', letterSpacing: 2 }}>{room.code}</strong>
               </div>
             </div>
 
