@@ -5,6 +5,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@lss/shared';
 import { env } from './config/env.js';
+import { createWorldSimulation } from './game/WorldSimulation.js';
 import { registerSocketHandlers } from './networking/socketHandlers.js';
 import { RoomManager } from './rooms/RoomManager.js';
 import type { SimulationFactory, TypedServer } from './rooms/GameRoom.js';
@@ -27,7 +28,10 @@ export function createGameServer(simulationFactory?: SimulationFactory): GameSer
       cors: { origin: env.corsOrigins, methods: ['GET', 'POST'] },
     },
   );
-  const roomManager = new RoomManager(io, simulationFactory);
+  const roomManager = new RoomManager(
+    io,
+    simulationFactory ?? ((room) => createWorldSimulation(room, io)),
+  );
 
   app.get('/health', (_req, res) => {
     res.json({
