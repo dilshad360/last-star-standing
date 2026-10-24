@@ -113,6 +113,23 @@ export class SoundManager {
     }, 80);
   }
 
+  /** EMP Nova shockwave discharge sound. */
+  playEmpBlast(): void {
+    this.playNoise({
+      duration: 0.5,
+      volume: 0.35,
+      filterFrequency: 600,
+      filterQ: 3,
+    });
+    this.playTone({
+      frequency: 420,
+      frequencyEnd: 45,
+      duration: 0.45,
+      type: 'sawtooth',
+      volume: 0.25,
+    });
+  }
+
   /** Storm warning pulse (repeating alarm). */
   playStormAlarm(): void {
     for (let i = 0; i < 3; i++) {

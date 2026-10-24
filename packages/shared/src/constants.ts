@@ -14,24 +14,24 @@ export const SNAPSHOT_INTERVAL_MS = TICK_INTERVAL_MS;
 // ── Ships ────────────────────────────────────────────────────────────────────
 export const SHIP_RADIUS = 20;
 export const SHIP_MAX_HEALTH = 100;
-export const SHIP_MAX_SPEED = 320;
-export const SHIP_ACCELERATION = 900;
-export const SHIP_DRAG = 2.2;
-export const SHIP_DRIFT_DRAG = 0.4;
-export const SHIP_BOOST_SPEED_MULTIPLIER = 1.45;
-export const SHIP_BOOST_ACCEL_MULTIPLIER = 1.5;
-export const SHIP_RECOIL_IMPULSE = 24;
+export const SHIP_MAX_SPEED = 420;
+export const SHIP_ACCELERATION = 1250;
+export const SHIP_DRAG = 2.0;
+export const SHIP_DRIFT_DRAG = 0.35;
+export const SHIP_BOOST_SPEED_MULTIPLIER = 1.6;
+export const SHIP_BOOST_ACCEL_MULTIPLIER = 1.65;
+export const SHIP_RECOIL_IMPULSE = 20;
 export const SHIP_ASTEROID_CONTACT_DAMAGE = 10;
-export const SHIP_TURN_SPEED = 4.2;
+export const SHIP_TURN_SPEED = 4.8;
 export const SHIP_REVERSE_SPEED_FACTOR = 0.55;
 export const SPAWN_SHIELD_MS = 2500;
 export const SPAWN_RING_RADIUS = 750;
 
 // ── Weapons & projectiles ────────────────────────────────────────────────────
-export const FIRE_COOLDOWN_MS = 280;
-export const RAPID_FIRE_COOLDOWN_MS = 140;
-export const PROJECTILE_RADIUS = 5;
-export const PROJECTILE_SPEED = 720;
+export const FIRE_COOLDOWN_MS = 240;
+export const RAPID_FIRE_COOLDOWN_MS = 120;
+export const PROJECTILE_RADIUS = 3;
+export const PROJECTILE_SPEED = 1050;
 export const PROJECTILE_DAMAGE = 20;
 export const PROJECTILE_LIFETIME_MS = 1200;
 export const MAX_PROJECTILES = 256;
@@ -50,18 +50,29 @@ export const PICKUP_RADIUS = 16;
 export const PICKUP_LIFETIME_MS = 12_000;
 export const MAX_PICKUPS = 24;
 
-export const UPGRADE_TYPES = ['SHIELD', 'RAPID_FIRE', 'REPAIR', 'ENERGY'] as const;
+export const UPGRADE_TYPES = [
+  'SHIELD',
+  'RAPID_FIRE',
+  'REPAIR',
+  'ENERGY',
+  'TRIPLE_SHOT',
+  'EMP_BLAST',
+] as const;
 
 export const UPGRADE_DURATIONS_MS: Record<UpgradeType, number> = {
   SHIELD: 6000,
   RAPID_FIRE: 6000,
   REPAIR: 0, // instant effect
   ENERGY: 8000,
+  TRIPLE_SHOT: 8000,
+  EMP_BLAST: 0, // instant shockwave
 };
 
 export const SHIELD_ABSORB = 60;
 export const REPAIR_HEAL_AMOUNT = 30;
 export const ENERGY_SPEED_MULTIPLIER = 1.35;
+export const EMP_RADIUS = 450;
+export const EMP_DAMAGE = 35;
 
 // ── Safe zone ────────────────────────────────────────────────────────────────
 export interface SafeZoneStageConfig {
@@ -139,6 +150,8 @@ export const PICKUP_COLORS: Record<UpgradeType, string> = {
   RAPID_FIRE: '#fb923c',
   REPAIR: '#4ade80',
   ENERGY: '#facc15',
+  TRIPLE_SHOT: '#c084fc',
+  EMP_BLAST: '#06b6d4',
 };
 
 export const COSMIC_EVENT_COLORS: Record<CosmicEventType, string> = {

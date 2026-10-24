@@ -1,7 +1,13 @@
 // ── Enums ────────────────────────────────────────────────────────────────────
 export type MatchStatus = 'LOBBY' | 'COUNTDOWN' | 'ACTIVE' | 'FINISHED';
 
-export type UpgradeType = 'SHIELD' | 'RAPID_FIRE' | 'REPAIR' | 'ENERGY';
+export type UpgradeType =
+  | 'SHIELD'
+  | 'RAPID_FIRE'
+  | 'REPAIR'
+  | 'ENERGY'
+  | 'TRIPLE_SHOT'
+  | 'EMP_BLAST';
 
 export type CosmicEventType = 'METEOR_SHOWER' | 'SOLAR_SURGE' | 'SUPPLY_DROP';
 
@@ -10,6 +16,7 @@ export type EliminationCause =
   | 'STORM'
   | 'ASTEROID'
   | 'METEOR'
+  | 'EMP'
   | 'DISCONNECT';
 
 export type MatchEndReason = 'LAST_SHIP_STANDING' | 'TIMEOUT' | 'ROOM_CLOSED';

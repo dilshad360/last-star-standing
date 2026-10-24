@@ -73,13 +73,13 @@ describe('ship & combat balance', () => {
     expect(SPAWN_RING_RADIUS).toBe(750);
   });
 
-  it('weapons use 280ms cooldown / 140ms rapid fire, 20 damage, 1.2s lifetime', () => {
-    expect(FIRE_COOLDOWN_MS).toBe(280);
-    expect(RAPID_FIRE_COOLDOWN_MS).toBe(140);
+  it('weapons use snappy cooldowns, 20 damage, 1.2s lifetime, and sleek projectile radius', () => {
+    expect(FIRE_COOLDOWN_MS).toBe(240);
+    expect(RAPID_FIRE_COOLDOWN_MS).toBe(120);
     expect(RAPID_FIRE_COOLDOWN_MS).toBeLessThan(FIRE_COOLDOWN_MS);
     expect(PROJECTILE_DAMAGE).toBe(20);
     expect(PROJECTILE_LIFETIME_MS).toBe(1200);
-    expect(PROJECTILE_RADIUS).toBe(5);
+    expect(PROJECTILE_RADIUS).toBe(3);
   });
 });
 
@@ -109,8 +109,8 @@ describe('asteroids & pickups', () => {
     expect(ASTEROID_RADIUS_MIN).toBeLessThan(ASTEROID_RADIUS_MAX);
   });
 
-  it('defines all four upgrade types with durations and colors', () => {
-    expect(UPGRADE_TYPES).toEqual(['SHIELD', 'RAPID_FIRE', 'REPAIR', 'ENERGY']);
+  it('defines all six upgrade types with durations and colors', () => {
+    expect(UPGRADE_TYPES).toEqual(['SHIELD', 'RAPID_FIRE', 'REPAIR', 'ENERGY', 'TRIPLE_SHOT', 'EMP_BLAST']);
     for (const type of UPGRADE_TYPES) {
       expect(UPGRADE_DURATIONS_MS[type]).toBeGreaterThanOrEqual(0);
       expect(PICKUP_COLORS[type]).toMatch(HEX_COLOR);
@@ -227,7 +227,14 @@ describe('contract structural invariants', () => {
 
   it('union types cover the documented value sets', () => {
     const statuses = ['LOBBY', 'COUNTDOWN', 'ACTIVE', 'FINISHED'] as const;
-    const upgrades: UpgradeType[] = ['SHIELD', 'RAPID_FIRE', 'REPAIR', 'ENERGY'];
+    const upgrades: UpgradeType[] = [
+      'SHIELD',
+      'RAPID_FIRE',
+      'REPAIR',
+      'ENERGY',
+      'TRIPLE_SHOT',
+      'EMP_BLAST',
+    ];
     const cosmic: CosmicEventType[] = [
       'METEOR_SHOWER',
       'SOLAR_SURGE',

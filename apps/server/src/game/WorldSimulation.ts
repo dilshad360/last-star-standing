@@ -26,6 +26,8 @@ import {
   ASTEROID_PICKUP_DROP_CHANCE,
   ASTEROID_RADIUS_MAX,
   ASTEROID_RADIUS_MIN,
+  EMP_DAMAGE,
+  EMP_RADIUS,
   ENERGY_SPEED_MULTIPLIER,
   FIRE_COOLDOWN_MS,
   MATCH_TIMEOUT_MS,
@@ -513,6 +515,53 @@ export class WorldSimulation implements MatchSimulation {
         expiresAt: this.now + PROJECTILE_LIFETIME_MS,
       });
 
+      // Special Power: TRIPLE_SHOT spread salvo (3 additional spread bolts)
+      if (ship.upgrades.TRIPLE_SHOT !== undefined && this.projectiles.size <= MAX_PROJECTILES - 3) {
+        const spreadAngle = 0.22; // ~13 degrees
+        // Angled left bolt
+        const id3 = `proj-${++this.projectileSeq}`;
+        const cosL = Math.cos(ship.rotation - spreadAngle);
+        const sinL = Math.sin(ship.rotation - spreadAngle);
+        this.projectiles.set(id3, {
+          id: id3,
+          ownerId: ship.id,
+          x: leftX,
+          y: leftY,
+          velocityX: cosL * PROJECTILE_SPEED,
+          velocityY: sinL * PROJECTILE_SPEED,
+          damage: Math.round(PROJECTILE_DAMAGE * 0.5),
+          expiresAt: this.now + PROJECTILE_LIFETIME_MS,
+        });
+
+        // Angled right bolt
+        const id4 = `proj-${++this.projectileSeq}`;
+        const cosR = Math.cos(ship.rotation + spreadAngle);
+        const sinR = Math.sin(ship.rotation + spreadAngle);
+        this.projectiles.set(id4, {
+          id: id4,
+          ownerId: ship.id,
+          x: rightX,
+          y: rightY,
+          velocityX: cosR * PROJECTILE_SPEED,
+          velocityY: sinR * PROJECTILE_SPEED,
+          damage: Math.round(PROJECTILE_DAMAGE * 0.5),
+          expiresAt: this.now + PROJECTILE_LIFETIME_MS,
+        });
+
+        // Nose centerline bolt
+        const id5 = `proj-${++this.projectileSeq}`;
+        this.projectiles.set(id5, {
+          id: id5,
+          ownerId: ship.id,
+          x: ship.x + cos * 20,
+          y: ship.y + sin * 20,
+          velocityX: cos * (PROJECTILE_SPEED * 1.05),
+          velocityY: sin * (PROJECTILE_SPEED * 1.05),
+          damage: Math.round(PROJECTILE_DAMAGE * 0.7),
+          expiresAt: this.now + PROJECTILE_LIFETIME_MS,
+        });
+      }
+
       // Space physics: Newton's 3rd Law reactive weapon recoil
       ship.velocityX -= cos * SHIP_RECOIL_IMPULSE;
       ship.velocityY -= sin * SHIP_RECOIL_IMPULSE;
@@ -559,14 +608,28 @@ export class WorldSimulation implements MatchSimulation {
       const isMeteor = projectile.ownerId === METEOR_OWNER_ID;
       const radius = isMeteor ? METEOR_RADIUS : PROJECTILE_RADIUS;
 
-      // Projectile ↔ ship (continuous swept-segment collision detection).
+      // Projectile ↔ ship (precision dual-circle capsule swept collision detection).
       let consumed = false;
       for (const ship of this.ships.values()) {
         if (!ship.alive || ship.id === projectile.ownerId) continue;
         if (this.now < ship.spawnProtectedUntil) continue;
-        const hit = SHIP_RADIUS + radius;
-        const dSq = this.distToSegmentSq(ship.x, ship.y, prevX, prevY, currX, currY);
-        if (dSq > hit * hit) continue;
+
+        const cos = Math.cos(ship.rotation);
+        const sin = Math.sin(ship.rotation);
+
+        // Forward cockpit circle (radius 11)
+        const noseX = ship.x + cos * 7;
+        const noseY = ship.y + sin * 7;
+        const noseHit = 11 + radius;
+        const hitNose = this.distToSegmentSq(noseX, noseY, prevX, prevY, currX, currY) <= noseHit * noseHit;
+
+        // Aft wing root circle (radius 14)
+        const aftX = ship.x - cos * 6;
+        const aftY = ship.y - sin * 6;
+        const aftHit = 14 + radius;
+        const hitAft = this.distToSegmentSq(aftX, aftY, prevX, prevY, currX, currY) <= aftHit * aftHit;
+
+        if (!hitNose && !hitAft) continue;
 
         const cause: EliminationCause = isMeteor ? 'METEOR' : 'PROJECTILE';
         this.applyDamage(ship, projectile.damage, {
@@ -584,7 +647,7 @@ export class WorldSimulation implements MatchSimulation {
 
       // Projectile ↔ asteroid (continuous swept-segment collision detection).
       for (const asteroid of this.asteroids.values()) {
-        const hit = asteroid.radius + radius;
+        const hit = asteroid.radius * 0.88 + radius;
         const dSq = this.distToSegmentSq(asteroid.x, asteroid.y, prevX, prevY, currX, currY);
         if (dSq > hit * hit) continue;
         asteroid.health -= projectile.damage;
@@ -710,8 +773,53 @@ export class WorldSimulation implements MatchSimulation {
     if (type === 'SHIELD') {
       ship.shield = SHIELD_ABSORB;
     }
+    if (type === 'EMP_BLAST') {
+      this.triggerEmpBlast(ship);
+      return;
+    }
     if (duration > 0) {
       ship.upgrades[type] = this.now + duration;
+    }
+  }
+
+  private triggerEmpBlast(sourceShip: ShipState): void {
+    // 1. Vaporize all enemy projectiles in flight within EMP_RADIUS
+    for (const [id, proj] of this.projectiles) {
+      if (proj.ownerId === sourceShip.id) continue;
+      const d = Math.hypot(proj.x - sourceShip.x, proj.y - sourceShip.y);
+      if (d <= EMP_RADIUS) {
+        this.projectiles.delete(id);
+      }
+    }
+
+    // 2. Knock back and damage all other ships within EMP_RADIUS
+    for (const ship of this.ships.values()) {
+      if (!ship.alive || ship.id === sourceShip.id) continue;
+      const dx = ship.x - sourceShip.x;
+      const dy = ship.y - sourceShip.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (dist <= EMP_RADIUS) {
+        const pushFactor = 1 - dist / EMP_RADIUS;
+        const pushForce = 420 * pushFactor;
+        ship.velocityX += (dx / dist) * pushForce;
+        ship.velocityY += (dy / dist) * pushForce;
+        this.applyDamage(ship, EMP_DAMAGE, {
+          shieldAbsorbs: true,
+          attackerId: sourceShip.id,
+          cause: 'EMP',
+        });
+      }
+    }
+
+    // 3. Shatter nearby asteroids
+    for (const asteroid of this.asteroids.values()) {
+      const dist = Math.hypot(asteroid.x - sourceShip.x, asteroid.y - sourceShip.y);
+      if (dist <= EMP_RADIUS) {
+        asteroid.health -= EMP_DAMAGE;
+        if (asteroid.health <= 0) {
+          this.destroyAsteroid(asteroid);
+        }
+      }
     }
   }
 

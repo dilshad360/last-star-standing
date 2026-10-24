@@ -7,10 +7,12 @@ import type {
   ProjectileState,
   SafeZoneState,
   PlayerInput,
+  UpgradeType,
 } from '@lss/shared';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
+  EMP_RADIUS,
   NEON,
   PICKUP_COLORS,
   SHIP_COLORS,
@@ -83,6 +85,7 @@ interface InterpolatedPickup {
   id: string;
   x: number;
   y: number;
+  type: UpgradeType;
   graphics: Phaser.GameObjects.Container;
 }
 
@@ -345,6 +348,9 @@ export class ArenaScene extends Phaser.Scene {
     }
     for (const [id, pickup] of this.pickups) {
       if (!seenPickups.has(id)) {
+        if (pickup.type === 'EMP_BLAST') {
+          this.createEmpShockwave(pickup.x, pickup.y);
+        }
         pickup.graphics.destroy();
         this.pickups.delete(id);
       }
@@ -779,17 +785,22 @@ export class ArenaScene extends Phaser.Scene {
     const isMeteor = proj.ownerId === 'cosmic:meteor';
     const colorHex = isMeteor ? NEON.meteor : NEON.projectile;
     const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
-    const radius = isMeteor ? 14 : 5;
 
     const container = this.add.container(proj.x, proj.y);
     container.setDepth(12);
 
-    // Outer plasma glow
-    const glow = this.add.circle(0, 0, radius * 1.6, color, 0.3);
-    // Core bolt elongated in flight direction
-    const core = this.add.ellipse(0, 0, radius * 2.4, radius * 1.1, 0xffffff, 0.95);
-    core.setStrokeStyle(1.5, color, 0.95);
-    container.add([glow, core]);
+    if (isMeteor) {
+      // Meteor fireball with pulsing glow
+      const glow = this.add.circle(0, 0, 18, color, 0.4);
+      const core = this.add.circle(0, 0, 11, 0xffffff, 0.95);
+      core.setStrokeStyle(2, color, 1);
+      container.add([glow, core]);
+    } else {
+      // Sleek, thin, elongated energy laser bolt (length 26px, width 3.5px)
+      const glow = this.add.ellipse(0, 0, 28, 6.5, color, 0.4);
+      const core = this.add.ellipse(0, 0, 24, 2.5, 0xffffff, 1.0);
+      container.add([glow, core]);
+    }
 
     return {
       id: proj.id,
@@ -852,11 +863,77 @@ export class ArenaScene extends Phaser.Scene {
   // ── Pickup creation ───────────────────────────────────────────────────────
 
   private createPickup(pickup: PickupState): InterpolatedPickup {
-    const color = Phaser.Display.Color.HexStringToColor(PICKUP_COLORS[pickup.type]).color;
-    const circle = this.add.circle(0, 0, 16, color, 0.4);
-    circle.setStrokeStyle(2, color, 1);
-    const graphics = this.add.container(pickup.x, pickup.y, [circle]);
-    return { id: pickup.id, x: pickup.x, y: pickup.y, graphics };
+    const color = Phaser.Display.Color.HexStringToColor(PICKUP_COLORS[pickup.type] ?? '#38bdf8').color;
+
+    // Outer glowing energy halo
+    const halo = this.add.circle(0, 0, 18, color, 0.16);
+    halo.setStrokeStyle(1.5, color, 0.7);
+
+    // Inner orb base
+    const core = this.add.circle(0, 0, 13, color, 0.45);
+    core.setStrokeStyle(2, 0xffffff, 0.9);
+
+    // Procedural neon vector icon
+    const icon = this.add.graphics();
+    this.drawPickupIcon(icon, pickup.type);
+
+    const graphics = this.add.container(pickup.x, pickup.y, [halo, core, icon]);
+
+    // Floating bobbing animation
+    this.tweens.add({
+      targets: graphics,
+      y: pickup.y - 5,
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    return { id: pickup.id, x: pickup.x, y: pickup.y, type: pickup.type, graphics };
+  }
+
+  private drawPickupIcon(g: Phaser.GameObjects.Graphics, type: UpgradeType): void {
+    g.clear();
+    g.lineStyle(2, 0xffffff, 1);
+
+    if (type === 'REPAIR') {
+      // Green medical plus cross (+)
+      g.lineBetween(-5, 0, 5, 0);
+      g.lineBetween(0, -5, 0, 5);
+    } else if (type === 'SHIELD') {
+      // Protective crest polygon
+      g.beginPath();
+      g.moveTo(0, -6);
+      g.lineTo(5, -2);
+      g.lineTo(3.5, 4);
+      g.lineTo(0, 7);
+      g.lineTo(-3.5, 4);
+      g.lineTo(-5, -2);
+      g.closePath();
+      g.strokePath();
+    } else if (type === 'RAPID_FIRE') {
+      // Twin rapid fire blaster barrels
+      g.lineBetween(-3, -5, -3, 5);
+      g.lineBetween(3, -5, 3, 5);
+    } else if (type === 'ENERGY') {
+      // Lightning bolt
+      g.beginPath();
+      g.moveTo(1, -6);
+      g.lineTo(-3, 0);
+      g.lineTo(2, 0);
+      g.lineTo(-1, 6);
+      g.strokePath();
+    } else if (type === 'TRIPLE_SHOT') {
+      // 3-way spread arrows
+      g.lineBetween(0, 5, 0, -5);
+      g.lineBetween(-2, 4, -5, -4);
+      g.lineBetween(2, 4, 5, -4);
+    } else if (type === 'EMP_BLAST') {
+      // Concentric shockwave rings
+      g.strokeCircle(0, 0, 3.5);
+      g.lineStyle(1.5, 0xffffff, 0.8);
+      g.strokeCircle(0, 0, 6.5);
+    }
   }
 
   // ── Environment: Multi-Layer Parallax Starfield & Space Cosmos ────────────
@@ -1060,6 +1137,49 @@ export class ArenaScene extends Phaser.Scene {
     if (dist < 1400) {
       const intensity = Math.max(0.006, 0.024 * (1 - dist / 1400));
       cam.shake(260, intensity);
+    }
+  }
+
+  // ── EMP Blast Shockwave ────────────────────────────────────────────────────
+
+  private createEmpShockwave(x: number, y: number): void {
+    soundManager.playEmpBlast();
+
+    // 1. Dual expanding neon cyan shockwave rings up to EMP_RADIUS (450px)
+    const ringOuter = this.add.circle(x, y, 16);
+    ringOuter.setStrokeStyle(4, 0x06b6d4, 1);
+    ringOuter.setDepth(19);
+
+    const ringInner = this.add.circle(x, y, 8);
+    ringInner.setStrokeStyle(2.5, 0xffffff, 0.95);
+    ringInner.setDepth(19);
+
+    this.tweens.add({
+      targets: ringOuter,
+      radius: EMP_RADIUS,
+      alpha: 0,
+      duration: 520,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ringOuter.destroy(),
+    });
+
+    this.tweens.add({
+      targets: ringInner,
+      radius: EMP_RADIUS * 0.7,
+      alpha: 0,
+      duration: 450,
+      ease: 'Quad.easeOut',
+      onComplete: () => ringInner.destroy(),
+    });
+
+    // 2. High-energy camera shake
+    const cam = this.cameras.main;
+    const camX = cam.scrollX + cam.width / 2;
+    const camY = cam.scrollY + cam.height / 2;
+    const dist = Math.hypot(x - camX, y - camY);
+    if (dist < 1800) {
+      const intensity = Math.max(0.012, 0.03 * (1 - dist / 1800));
+      cam.shake(360, intensity);
     }
   }
 

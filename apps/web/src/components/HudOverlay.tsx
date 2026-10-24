@@ -31,6 +31,15 @@ interface HudOverlayProps {
   onToggleMute: () => void;
 }
 
+const UPGRADE_LABELS: Record<UpgradeType, string> = {
+  REPAIR: 'Hull Repair',
+  SHIELD: 'Shield Matrix',
+  RAPID_FIRE: 'Rapid Fire',
+  ENERGY: 'Afterburner',
+  TRIPLE_SHOT: 'Spread Shot',
+  EMP_BLAST: 'EMP Blast',
+};
+
 export const HudOverlay: React.FC<HudOverlayProps> = ({
   localPlayer,
   snapshot,
@@ -399,7 +408,7 @@ export const HudOverlay: React.FC<HudOverlayProps> = ({
                       padding: '2px 6px',
                     }}
                   >
-                    {u.type} ({u.remainingSec}s)
+                    {UPGRADE_LABELS[u.type] ?? u.type} ({u.remainingSec}s)
                   </span>
                 ))}
               </div>
