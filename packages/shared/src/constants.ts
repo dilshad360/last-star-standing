@@ -98,15 +98,33 @@ export const SAFE_ZONE_STAGES: readonly SafeZoneStageConfig[] = [
 
 // ── Match lifecycle ──────────────────────────────────────────────────────────
 export const COUNTDOWN_DURATION_MS = 3000;
+/** Free-for-all round length; most kills when the timer hits zero wins. */
 export const MATCH_TIMEOUT_MS = 180_000;
+export const RESPAWN_DELAY_MS = 3000;
+/** Respawn points keep at least this distance from other living ships when possible. */
+export const RESPAWN_MIN_DISTANCE = 450;
+/** The free-for-all arena keeps a fixed safe ring; shrinking is battle-royale only. */
+export const SAFE_ZONE_SHRINKS = false;
+
+// ── Phone controllers ────────────────────────────────────────────────────────
+/** Ships turn toward the analog stick direction at this rate (rad/s). */
+export const ANALOG_TURN_SPEED = 9;
+export const ANALOG_DEADZONE = 0.18;
+/** Phone tilt (degrees from the calibrated pose) that maps to full stick deflection. */
+export const TILT_MAX_DEGREES = 25;
+export const TILT_DEADZONE_DEGREES = 4;
+/** A controller input older than this is treated as released (phone locked / backgrounded). */
+export const INPUT_STALE_MS = 600;
+/** controller:state is sent every N simulation ticks (25 Hz / 4 ≈ 6 Hz). */
+export const CONTROLLER_STATE_EVERY_TICKS = 4;
+export const PLAYER_RECONNECT_GRACE_MS = 60_000;
+export const HOST_RECONNECT_GRACE_MS = 30_000;
 
 // ── Rooms & players ──────────────────────────────────────────────────────────
 export const ROOM_CODE_LENGTH = 4;
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
 export const MAX_PLAYERS_PER_ROOM = 8;
-export const MIN_HUMANS_TO_START = 1;
 export const MAX_BOTS_PER_ROOM = 7;
-export const QUICK_PLAY_DEFAULT_BOTS = 5;
 export const MIN_DISPLAY_NAME_LENGTH = 1;
 export const MAX_DISPLAY_NAME_LENGTH = 16;
 
@@ -143,6 +161,18 @@ export const SHIP_COLORS = [
   '#fb7185',
   '#2dd4bf',
   '#fde047',
+] as const;
+
+/** Spoken names for SHIP_COLORS so phones can say "You are the CYAN ship". */
+export const SHIP_COLOR_NAMES = [
+  'Cyan',
+  'Pink',
+  'Lime',
+  'Amber',
+  'Violet',
+  'Rose',
+  'Teal',
+  'Yellow',
 ] as const;
 
 export const PICKUP_COLORS: Record<UpgradeType, string> = {

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import type {
   ClientToServerEvents,
-  JoinAck,
+  ControllerJoinAck,
+  HostAck,
   PlayerInput,
   RoomErrorCode,
   ServerToClientEvents,
@@ -12,7 +13,6 @@ import {
   MAX_BOTS_PER_ROOM,
   MAX_DISPLAY_NAME_LENGTH,
   MIN_DISPLAY_NAME_LENGTH,
-  QUICK_PLAY_DEFAULT_BOTS,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
 } from '@lss/shared';
@@ -23,7 +23,7 @@ type TypedSocket = Socket<
   ClientToServerEvents,
   ServerToClientEvents,
   Record<string, never>,
-  { playerId?: string; roomCode?: string }
+  { role?: 'host' | 'controller'; playerId?: string; roomCode?: string }
 >;
 
 type Ack<T> = ((res: T) => void) | undefined;
@@ -49,6 +49,14 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function clampUnit(value: number): number {
+  return Math.max(-1, Math.min(1, value));
+}
+
+function isToken(raw: unknown): raw is string {
+  return typeof raw === 'string' && raw.length >= 16 && raw.length <= 64;
+}
+
 function validateInput(raw: unknown): PlayerInput | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const input = raw as Record<string, unknown>;
@@ -65,6 +73,9 @@ function validateInput(raw: unknown): PlayerInput | null {
     sequence: input.sequence,
     drift: input.drift === true,
     boost: input.boost === true,
+    ...(isFiniteNumber(input.moveX) && isFiniteNumber(input.moveY)
+      ? { moveX: clampUnit(input.moveX), moveY: clampUnit(input.moveY) }
+      : {}),
   };
 }
 
@@ -92,6 +103,7 @@ class RateLimiter {
 }
 
 const newPlayerId = (): string => `p-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+const newToken = (): string => randomUUID().replaceAll('-', '');
 
 export function registerSocketHandlers(
   socket: TypedSocket,
@@ -100,7 +112,7 @@ export function registerSocketHandlers(
   const limiter = new RateLimiter();
   const sid = socket.id;
 
-  const fail = <T extends JoinAck | SimpleAck>(
+  const fail = <T extends HostAck | ControllerJoinAck | SimpleAck>(
     ack: Ack<T>,
     code: RoomErrorCode,
     error: string,
@@ -113,134 +125,123 @@ export function registerSocketHandlers(
     return code ? roomManager.getRoom(code) : undefined;
   };
 
-  const leaveCurrentRoom = (): void => {
+  /** Host-screen commands must come from the socket currently attached as host. */
+  const hostRoom = (): GameRoom | undefined => {
     const room = currentRoom();
-    const playerId = socket.data.playerId;
+    return socket.data.role === 'host' && room?.hostSocketId === sid ? room : undefined;
+  };
+
+  const leaveCurrentRoom = (explicit: boolean): void => {
+    const room = currentRoom();
+    const { role, playerId } = socket.data;
     socket.data.roomCode = undefined;
-    if (room && playerId) {
-      socket.leave(room.code);
-      room.removePlayer(playerId);
+    socket.data.role = undefined;
+    socket.data.playerId = undefined;
+    if (!room) return;
+    void socket.leave(room.code);
+    if (role === 'host') {
+      void socket.leave(room.hostChannel);
+      if (room.hostSocketId !== sid) return;
+      if (explicit) room.close('The host closed the room.');
+      else room.detachHost();
+    } else if (role === 'controller' && playerId) {
+      if (explicit) room.removePlayer(playerId);
+      else room.disconnectPlayer(playerId);
     }
   };
 
-  const joinRoom = (
-    socket2: TypedSocket,
-    room: GameRoom,
-    displayName: string,
-  ): { ok: true; playerId: string } | { ok: false; code: RoomErrorCode; error: string } => {
-    const playerId = newPlayerId();
-    const result = room.addPlayer({ id: playerId, socketId: socket2.id, displayName });
-    if (!result.ok) return result;
-    socket2.data.playerId = playerId;
-    socket2.data.roomCode = room.code;
-    void socket2.join(room.code);
-    return { ok: true, playerId };
+  const bindHost = (room: GameRoom, token: string): void => {
+    socket.data.role = 'host';
+    socket.data.roomCode = room.code;
+    void socket.join([room.code, room.hostChannel]);
+    room.attachHost(sid, token);
   };
 
-  // ── room:create ──────────────────────────────────────────────────────────
-  socket.on('room:create', (payload, ack) => {
-    if (!limiter.allow(`${sid}:create`, 8, 10_000)) {
-      return fail(ack, 'INTERNAL', 'Too many requests. Slow down.');
-    }
-    const name = sanitizeDisplayName(payload?.displayName);
-    if (!name) {
-      return fail(ack, 'INVALID_NAME', `Display name must be ${MIN_DISPLAY_NAME_LENGTH}-${MAX_DISPLAY_NAME_LENGTH} characters.`);
-    }
-    leaveCurrentRoom();
-    const room = roomManager.createRoom({ isCustom: true });
-    const joined = joinRoom(socket, room, name);
-    if (!joined.ok) {
-      roomManager.removeRoom(room.code);
-      return fail(ack, joined.code, joined.error);
-    }
-    room.broadcast();
-    ack?.({ ok: true, room: room.toRoomInfo(), playerId: joined.playerId });
+  const rateLimited = (key: string, limit: number): boolean =>
+    !limiter.allow(`${sid}:${key}`, limit, 10_000);
+
+  // ── host:create ──────────────────────────────────────────────────────────
+  socket.on('host:create', (ack) => {
+    if (rateLimited('host', 8)) return fail(ack, 'RATE_LIMITED', 'Too many requests. Slow down.');
+    leaveCurrentRoom(true);
+    const room = roomManager.createRoom();
+    const hostToken = newToken();
+    bindHost(room, hostToken);
+    ack?.({ ok: true, room: room.toRoomInfo(), hostToken });
   });
 
-  // ── room:join ────────────────────────────────────────────────────────────
-  socket.on('room:join', (payload, ack) => {
-    if (!limiter.allow(`${sid}:join`, 12, 10_000)) {
-      return fail(ack, 'INTERNAL', 'Too many requests. Slow down.');
+  // ── host:resume ──────────────────────────────────────────────────────────
+  socket.on('host:resume', (payload, ack) => {
+    if (rateLimited('host', 8)) return fail(ack, 'RATE_LIMITED', 'Too many requests. Slow down.');
+    const code = normalizeRoomCode(payload?.code);
+    if (!code) return fail(ack, 'INVALID_CODE', 'Room code must be 4 characters.');
+    const room = roomManager.getRoom(code);
+    if (!room) return fail(ack, 'ROOM_NOT_FOUND', `No room found with code ${code}.`);
+    if (!isToken(payload?.hostToken) || payload.hostToken !== room.hostToken) {
+      return fail(ack, 'NOT_HOST', 'This screen is not the host of that room.');
     }
+    if (socket.data.roomCode !== room.code) leaveCurrentRoom(true);
+    bindHost(room, room.hostToken);
+    ack?.({ ok: true, room: room.toRoomInfo(), hostToken: room.hostToken });
+  });
+
+  // ── controller:join ──────────────────────────────────────────────────────
+  socket.on('controller:join', (payload, ack) => {
+    if (rateLimited('join', 12)) return fail(ack, 'RATE_LIMITED', 'Too many requests. Slow down.');
     const name = sanitizeDisplayName(payload?.displayName);
     if (!name) {
       return fail(ack, 'INVALID_NAME', `Display name must be ${MIN_DISPLAY_NAME_LENGTH}-${MAX_DISPLAY_NAME_LENGTH} characters.`);
     }
     const code = normalizeRoomCode(payload?.code);
-    if (!code) {
-      return fail(ack, 'INVALID_CODE', 'Room code must be 4 characters.');
-    }
+    if (!code) return fail(ack, 'INVALID_CODE', 'Room code must be 4 characters.');
     const room = roomManager.getRoom(code);
-    if (!room) {
-      return fail(ack, 'ROOM_NOT_FOUND', `No room found with code ${code}.`);
+    if (!room) return fail(ack, 'ROOM_NOT_FOUND', `No room found with code ${code}.`);
+
+    const returning = isToken(payload?.playerToken)
+      ? room.findPlayerByToken(payload.playerToken)
+      : undefined;
+    if (returning && returning.socketId === sid) {
+      return ack?.({
+        ok: true,
+        room: room.toRoomInfo(),
+        playerId: returning.id,
+        playerToken: returning.token ?? '',
+      });
     }
-    if (socket.data.roomCode === room.code && socket.data.playerId) {
-      // Idempotent rejoin from the same socket.
-      return ack?.({ ok: true, room: room.toRoomInfo(), playerId: socket.data.playerId });
+
+    leaveCurrentRoom(true);
+    let playerId: string;
+    let playerToken: string;
+    if (returning?.token) {
+      room.reconnectPlayer(returning, sid, name);
+      playerId = returning.id;
+      playerToken = returning.token;
+    } else {
+      playerId = newPlayerId();
+      playerToken = newToken();
+      const added = room.addPlayer({ id: playerId, token: playerToken, socketId: sid, displayName: name });
+      if (!added.ok) return fail(ack, added.code, added.error);
     }
-    leaveCurrentRoom();
-    const joined = joinRoom(socket, room, name);
-    if (!joined.ok) return fail(ack, joined.code, joined.error);
+    socket.data.role = 'controller';
+    socket.data.playerId = playerId;
+    socket.data.roomCode = room.code;
+    void socket.join(room.code);
     room.broadcast();
-    ack?.({ ok: true, room: room.toRoomInfo(), playerId: joined.playerId });
-  });
-
-  // ── room:quickPlay ───────────────────────────────────────────────────────
-  socket.on('room:quickPlay', (payload, ack) => {
-    if (!limiter.allow(`${sid}:quick`, 8, 10_000)) {
-      return fail(ack, 'INTERNAL', 'Too many requests. Slow down.');
-    }
-    const name = sanitizeDisplayName(payload?.displayName);
-    if (!name) {
-      return fail(ack, 'INVALID_NAME', `Display name must be ${MIN_DISPLAY_NAME_LENGTH}-${MAX_DISPLAY_NAME_LENGTH} characters.`);
-    }
-    leaveCurrentRoom();
-
-    // If the player specifically selected "Play vs Bots" with botCount, create a dedicated
-    // bot play room with their desired bot count so launch is instant and unconflicted.
-    // Otherwise, match into an open non-custom quick-play lobby or create a new one.
-    const isBotMatch = isFiniteNumber(payload?.botCount);
-    let room = isBotMatch ? undefined : roomManager.findQuickPlayRoom();
-    const created = !room;
-    room ??= roomManager.createRoom({ isCustom: false });
-
-    const joined = joinRoom(socket, room, name);
-    if (!joined.ok) {
-      if (created) roomManager.removeRoom(room.code);
-      return fail(ack, joined.code, joined.error);
-    }
-
-    if (created) {
-      const requested = isFiniteNumber(payload?.botCount)
-        ? payload.botCount
-        : QUICK_PLAY_DEFAULT_BOTS;
-      room.applyBotCount(requested);
-    }
-    room.setReady(joined.playerId, true);
-    room.broadcast();
-    ack?.({ ok: true, room: room.toRoomInfo(), playerId: joined.playerId });
-
-    // Instant-match promise: a freshly created quick-play room launches the
-    // countdown automatically.
-    if (created) room.startCountdown();
+    ack?.({ ok: true, room: room.toRoomInfo(), playerId, playerToken });
   });
 
   // ── room:leave ───────────────────────────────────────────────────────────
   socket.on('room:leave', (ack) => {
-    leaveCurrentRoom();
+    leaveCurrentRoom(true);
     ack?.({ ok: true });
   });
 
   // ── room:setBots ─────────────────────────────────────────────────────────
   socket.on('room:setBots', (payload, ack) => {
-    const room = currentRoom();
-    const playerId = socket.data.playerId;
-    if (!room || !playerId) return fail(ack, 'NOT_IN_ROOM', 'You are not in a room.');
-    if (room.hostPlayerId !== playerId) {
-      return fail(ack, 'NOT_HOST', 'Only the host can configure AI Bot Pilots.');
-    }
-    if (room.status !== 'LOBBY') {
-      return fail(ack, 'INVALID_STATE', 'Bots can only be changed in the lobby.');
+    const room = hostRoom();
+    if (!room) return fail(ack, 'NOT_HOST', 'Only the host screen can configure AI pilots.');
+    if (room.status !== 'LOBBY' && room.status !== 'FINISHED') {
+      return fail(ack, 'INVALID_STATE', 'Bots can only be changed between rounds.');
     }
     const count = payload?.count;
     if (!isFiniteNumber(count) || count < 0 || count > MAX_BOTS_PER_ROOM) {
@@ -251,29 +252,11 @@ export function registerSocketHandlers(
     ack?.({ ok: true });
   });
 
-  // ── player:ready ─────────────────────────────────────────────────────────
-  socket.on('player:ready', (payload, ack) => {
-    const room = currentRoom();
-    const playerId = socket.data.playerId;
-    if (!room || !playerId) return fail(ack, 'NOT_IN_ROOM', 'You are not in a room.');
-    if (!room.setReady(playerId, payload?.ready === true)) {
-      return fail(ack, 'INTERNAL', 'Unable to set ready state.');
-    }
-    room.broadcast();
-    ack?.({ ok: true });
-  });
-
   // ── match:start ──────────────────────────────────────────────────────────
   socket.on('match:start', (ack) => {
-    if (!limiter.allow(`${sid}:start`, 5, 10_000)) {
-      return fail(ack, 'INTERNAL', 'Too many requests. Slow down.');
-    }
-    const room = currentRoom();
-    const playerId = socket.data.playerId;
-    if (!room || !playerId) return fail(ack, 'NOT_IN_ROOM', 'You are not in a room.');
-    if (room.hostPlayerId !== playerId) {
-      return fail(ack, 'NOT_HOST', 'Only the host can start the match.');
-    }
+    if (rateLimited('start', 5)) return fail(ack, 'RATE_LIMITED', 'Too many requests. Slow down.');
+    const room = hostRoom();
+    if (!room) return fail(ack, 'NOT_HOST', 'Only the host screen can start the match.');
     const result = room.startCountdown();
     if (!result.ok) return fail(ack, result.code, result.error);
     ack?.({ ok: true });
@@ -281,12 +264,8 @@ export function registerSocketHandlers(
 
   // ── match:restart ────────────────────────────────────────────────────────
   socket.on('match:restart', (ack) => {
-    const room = currentRoom();
-    const playerId = socket.data.playerId;
-    if (!room || !playerId) return fail(ack, 'NOT_IN_ROOM', 'You are not in a room.');
-    if (room.hostPlayerId !== playerId) {
-      return fail(ack, 'NOT_HOST', 'Only the host can restart the match.');
-    }
+    const room = hostRoom();
+    if (!room) return fail(ack, 'NOT_HOST', 'Only the host screen can restart the match.');
     const result = room.restartToLobby();
     if (!result.ok) return fail(ack, result.code, result.error);
     ack?.({ ok: true });
@@ -296,6 +275,7 @@ export function registerSocketHandlers(
   socket.on('input:update', (raw) => {
     // Cheap per-socket cap against impossible action rates.
     if (!limiter.allow(`${sid}:input`, 150, 1_000)) return;
+    if (socket.data.role !== 'controller') return;
     const input = validateInput(raw);
     if (!input) return;
     const room = currentRoom();
@@ -305,7 +285,7 @@ export function registerSocketHandlers(
 
   // ── disconnect ───────────────────────────────────────────────────────────
   socket.on('disconnect', () => {
-    leaveCurrentRoom();
+    leaveCurrentRoom(false);
     limiter.clear(sid);
   });
 }

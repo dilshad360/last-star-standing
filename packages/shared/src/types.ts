@@ -19,7 +19,9 @@ export type EliminationCause =
   | 'EMP'
   | 'DISCONNECT';
 
-export type MatchEndReason = 'LAST_SHIP_STANDING' | 'TIMEOUT' | 'ROOM_CLOSED';
+export type MatchEndReason = 'TIMEOUT' | 'ROOM_CLOSED';
+
+export type HapticKind = 'hit' | 'kill' | 'killed' | 'respawn';
 
 // ── Input ────────────────────────────────────────────────────────────────────
 /** The only per-frame payload a client may send. Server-authoritative intents only. */
@@ -35,8 +37,12 @@ export interface PlayerInput {
   sequence: number;
   /** Space drift / Flight assist disengaged (Inertial Dampeners off). */
   drift?: boolean;
-  /** Afterburner thruster boost active (Shift key held). */
+  /** Afterburner thruster boost active. */
   boost?: boolean;
+  /** Analog stick/tilt X in -1..1 (screen right is +). Overrides the booleans when set. */
+  moveX?: number;
+  /** Analog stick/tilt Y in -1..1 (screen down is +). */
+  moveY?: number;
 }
 
 // ── Live entity state (inside GameSnapshot) ──────────────────────────────────
@@ -58,6 +64,11 @@ export interface PlayerState {
   shield: number;
   alive: boolean;
   kills: number;
+  deaths: number;
+  /** Server timestamp (ms) when a destroyed ship respawns; null while alive or offline. */
+  respawnAt: number | null;
+  /** False while the controlling phone is disconnected. */
+  connected: boolean;
   /** Active upgrade type → server timestamp (ms) when it expires. */
   upgrades: Partial<Record<UpgradeType, number>>;
   /** Server timestamp (ms) until which this ship is spawn-invulnerable. */
@@ -164,6 +175,7 @@ export interface PlayerMatchStats {
   /** 1 = winner. */
   placement: number;
   kills: number;
+  deaths: number;
   damageDealt: number;
   survivalTimeMs: number;
 }
@@ -181,8 +193,6 @@ export interface MatchResult {
 export interface RoomPlayerInfo {
   id: string;
   displayName: string;
-  isHost: boolean;
-  isReady: boolean;
   isBot: boolean;
   isConnected: boolean;
   colorIndex: number;
@@ -191,11 +201,29 @@ export interface RoomPlayerInfo {
 export interface RoomInfo {
   code: string;
   status: MatchStatus;
-  hostPlayerId: string;
+  /** False while the host screen is reconnecting. */
+  hostConnected: boolean;
   players: RoomPlayerInfo[];
   botCount: number;
   maxPlayers: number;
   createdAt: number;
-  isCustom?: boolean;
+}
+
+/** Per-phone status pushed to a single controller a few times per second. */
+export interface ControllerState {
+  status: MatchStatus;
+  alive: boolean;
+  health: number;
+  maxHealth: number;
+  shield: number;
+  kills: number;
+  deaths: number;
+  /** 1-based scoreboard position by kills. */
+  rank: number;
+  totalPlayers: number;
+  respawnAt: number | null;
+  upgrades: Partial<Record<UpgradeType, number>>;
+  timeRemainingMs: number;
+  serverTime: number;
 }
 

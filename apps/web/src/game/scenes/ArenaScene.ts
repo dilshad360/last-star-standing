@@ -6,26 +6,20 @@ import type {
   PlayerState,
   ProjectileState,
   SafeZoneState,
-  PlayerInput,
   UpgradeType,
 } from '@lss/shared';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   EMP_RADIUS,
-  FIRE_COOLDOWN_MS,
   NEON,
   PICKUP_COLORS,
-  PICKUP_RADIUS,
-  RAPID_FIRE_COOLDOWN_MS,
   SHIP_COLORS,
   SHIP_MAX_SPEED,
   SHIP_RADIUS,
 } from '@lss/shared';
 import { gameEvents } from '../EventBus.js';
-import { socketClient } from '../../networking/SocketClient.js';
 import { soundManager } from '../audio/SoundManager.js';
-import { InputManager } from '../input/InputManager.js';
 
 // ── Interpolation state ──────────────────────────────────────────────────────
 interface InterpolatedShip {
@@ -55,7 +49,6 @@ interface InterpolatedShip {
   shieldGraphics: Phaser.GameObjects.Graphics;
   healthBar: Phaser.GameObjects.Graphics;
   nameText: Phaser.GameObjects.Text;
-  localIndicator?: Phaser.GameObjects.Graphics;
   hitGraphics: Phaser.GameObjects.Graphics;
   lastHealth: number;
   lastShield: number;
@@ -96,15 +89,17 @@ interface InterpolatedPickup {
 
 const INTERPOLATION_DELAY_MS = 100; // Render 100ms behind server time
 const LERP_FACTOR = 0.2;
+/** Host-screen camera: keep every living ship in frame. */
+const CAMERA_PADDING = 260;
+const CAMERA_MIN_ZOOM_SPAN = 900;
+const CAMERA_LERP = 0.04;
 
 /**
- * Main game scene: renders the 2400×2400 neon arena with procedural graphics,
- * multi-layer parallax space starfields, instant local mouse aim,
- * snapshot interpolation, weapons physics, and cockpit avionics crosshairs.
+ * Host-screen arena: renders the 2400×2400 neon arena with procedural
+ * graphics and snapshot interpolation. Nobody plays on this screen, so the
+ * camera frames every living ship instead of following one.
  */
 export class ArenaScene extends Phaser.Scene {
-  public inputManager!: InputManager;
-  private localPlayerId: string | null = null;
   private ships = new Map<string, InterpolatedShip>();
   private projectiles = new Map<string, InterpolatedProjectile>();
   private asteroids = new Map<string, InterpolatedAsteroid>();
@@ -116,25 +111,12 @@ export class ArenaScene extends Phaser.Scene {
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private boundaryGraphics!: Phaser.GameObjects.Graphics;
   private planetContainer!: Phaser.GameObjects.Container;
-  private latestSnapshot: GameSnapshot | null = null;
-  private spectatorIndex = 0;
-  private syncedInitialHeading = false;
-  private lastLaserSoundAt = 0;
   private unsubscribeSnapshot: (() => void) | null = null;
   private unsubscribeEliminated: (() => void) | null = null;
   private explosionEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   constructor() {
     super({ key: 'ArenaScene' });
-  }
-
-  init(data: { localPlayerId?: string }): void {
-    if (data?.localPlayerId) {
-      this.localPlayerId = data.localPlayerId;
-    }
-    this.syncedInitialHeading = false;
-    this.lastLaserSoundAt = 0;
-    this.inputManager = new InputManager();
   }
 
   create(): void {
@@ -196,15 +178,8 @@ export class ArenaScene extends Phaser.Scene {
     this.createSafeZone();
 
 
-    // Attach input manager to canvas
-    const canvas = this.game.canvas;
-    this.inputManager.attach(canvas, (input) => {
-      this.handleLocalInput(input);
-    });
-
     // Subscribe to snapshots via EventBus
     this.unsubscribeSnapshot = gameEvents.on('snapshot:update', (snapshot) => {
-      this.latestSnapshot = snapshot;
       this.processSnapshot(snapshot);
     });
 
@@ -213,9 +188,7 @@ export class ArenaScene extends Phaser.Scene {
       if (victimShip) {
         this.createExplosion(victimShip.x, victimShip.y, victimShip.color);
       }
-      if (entry.victimId === this.localPlayerId) {
-        this.startSpectating();
-      }
+      soundManager.playExplosion();
     });
 
     // Detach DOM listeners and EventBus subs on every scene restart/shutdown.
@@ -223,44 +196,11 @@ export class ArenaScene extends Phaser.Scene {
 
     // Camera setup - center immediately on arena center to avoid void in top-left
     this.cameras.main.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
-    this.cameras.main.setZoom(0.8);
+    this.cameras.main.setZoom(this.fitZoom(ARENA_WIDTH, ARENA_HEIGHT));
     this.cameras.main.centerOn(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
-    if (this.localPlayerId && this.ships.has(this.localPlayerId)) {
-      const localShip = this.ships.get(this.localPlayerId)!;
-      this.cameras.main.centerOn(localShip.x, localShip.y);
-    }
-  }
-
-  setLocalPlayerId(id: string | null): void {
-    if (this.localPlayerId !== id) {
-      this.syncedInitialHeading = false;
-    }
-    this.localPlayerId = id;
-    if (id && this.ships.has(id)) {
-      const ship = this.ships.get(id)!;
-      if (!this.syncedInitialHeading) {
-        this.inputManager.setFacingAngle(ship.targetRotation);
-        ship.rotation = ship.targetRotation;
-        ship.shipVisualContainer.setRotation(ship.rotation);
-        this.syncedInitialHeading = true;
-      }
-      this.cameras.main.centerOn(ship.x, ship.y);
-    }
   }
 
   update(time: number, delta: number): void {
-    // ── 0. Update Input Manager with delta seconds ──────────────────────────
-    this.inputManager.update(delta / 1000);
-
-    // ── 1. Local Ship Heading from Keyboard Steering ────────────────────────
-    if (this.localPlayerId) {
-      const localShip = this.ships.get(this.localPlayerId);
-      if (localShip && localShip.alive) {
-        localShip.rotation = this.inputManager.getFacingAngle();
-        localShip.shipVisualContainer.setRotation(localShip.rotation);
-      }
-    }
-
     // ── 2. Multi-Layer Parallax Starfield & Deep Space Motion ───────────────
     const cx = this.cameras.main.scrollX;
     const cy = this.cameras.main.scrollY;
@@ -305,6 +245,7 @@ export class ArenaScene extends Phaser.Scene {
         ship = this.createShip(player);
         this.ships.set(player.id, ship);
       }
+      const respawned = !ship.alive && player.alive;
       ship.prevX = ship.x;
       ship.prevY = ship.y;
       ship.prevRotation = ship.rotation;
@@ -312,26 +253,15 @@ export class ArenaScene extends Phaser.Scene {
       ship.targetY = player.y;
       ship.targetRotation = player.rotation;
       ship.lastUpdate = now;
-      if (player.id === this.localPlayerId && !this.syncedInitialHeading) {
-        this.inputManager.setFacingAngle(player.rotation);
+      if (respawned) {
+        // Teleport instead of sliding across the arena from the death spot.
+        ship.x = player.x;
+        ship.y = player.y;
         ship.rotation = player.rotation;
-        ship.shipVisualContainer.setRotation(player.rotation);
-        this.syncedInitialHeading = true;
+        ship.graphics.setPosition(ship.x, ship.y);
+        ship.shipVisualContainer.setRotation(ship.rotation);
       }
       this.updateShipVisuals(ship, player);
-    }
-
-    // Snap camera to local ship as soon as it appears (only while alive)
-    if (this.localPlayerId && this.ships.has(this.localPlayerId)) {
-      const myShip = this.ships.get(this.localPlayerId)!;
-      if (myShip.alive) {
-        const cam = this.cameras.main;
-        const camX = cam.scrollX + cam.width / 2;
-        const camY = cam.scrollY + cam.height / 2;
-        if (Math.hypot(camX - myShip.x, camY - myShip.y) > 900) {
-          cam.centerOn(myShip.x, myShip.y);
-        }
-      }
     }
 
     // Clean up removed/disconnected ships
@@ -400,16 +330,6 @@ export class ArenaScene extends Phaser.Scene {
       if (!seenPickups.has(id)) {
         if (pickup.type === 'EMP_BLAST') {
           this.createEmpShockwave(pickup.x, pickup.y);
-        } else if (this.localPlayerId) {
-          const localShip = this.ships.get(this.localPlayerId);
-          if (
-            localShip &&
-            localShip.alive &&
-            Math.hypot(localShip.x - pickup.x, localShip.y - pickup.y) <=
-              SHIP_RADIUS + PICKUP_RADIUS + 40
-          ) {
-            soundManager.playPickup();
-          }
         }
         pickup.graphics.destroy();
         this.pickups.delete(id);
@@ -423,14 +343,14 @@ export class ArenaScene extends Phaser.Scene {
   // ── Ship creation & visuals ───────────────────────────────────────────────
 
   private createShip(player: PlayerState): InterpolatedShip {
-    const isLocal = player.id === this.localPlayerId;
+    const colorHex = SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!;
     const color = Phaser.Display.Color.HexStringToColor(
       SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!,
     ).color;
 
     // Clean simple procedural neon spaceship hull
     const hullGraphics = this.add.graphics();
-    this.drawSimpleShipHull(hullGraphics, color, isLocal);
+    this.drawSimpleShipHull(hullGraphics, color);
 
     // Dynamic dual exhaust flames (rendered beneath the ship hull)
     const flameGraphics = this.add.graphics();
@@ -447,24 +367,16 @@ export class ArenaScene extends Phaser.Scene {
     const healthBar = this.add.graphics();
 
     // Name tag
-    const nameText = this.add.text(0, -SHIP_RADIUS - 30, player.displayName, {
-      fontSize: '12px',
-      color: isLocal ? '#22d3ee' : '#ffffff',
+    // Name tag in the pilot's color, sized to read from across the room.
+    const nameText = this.add.text(0, -SHIP_RADIUS - 32, player.displayName, {
+      fontSize: '18px',
+      fontStyle: 'bold',
+      color: colorHex,
       fontFamily: 'monospace',
+      stroke: '#05050f',
+      strokeThickness: 4,
     });
     nameText.setOrigin(0.5, 0.5);
-
-    // Tactical reticle chevron for local player
-    let localIndicator: Phaser.GameObjects.Graphics | undefined;
-    if (isLocal) {
-      localIndicator = this.add.graphics();
-      localIndicator.lineStyle(2, 0x22d3ee, 0.95);
-      localIndicator.beginPath();
-      localIndicator.moveTo(-6, -SHIP_RADIUS - 10);
-      localIndicator.lineTo(0, -SHIP_RADIUS - 5);
-      localIndicator.lineTo(6, -SHIP_RADIUS - 10);
-      localIndicator.strokePath();
-    }
 
     // Hit flash red damage indicator overlay
     const hitGraphics = this.add.graphics();
@@ -488,9 +400,6 @@ export class ArenaScene extends Phaser.Scene {
       healthBar,
       nameText,
     ];
-    if (localIndicator) {
-      containerChildren.push(localIndicator);
-    }
 
     const graphics = this.add.container(player.x, player.y, containerChildren);
     graphics.setDepth(10);
@@ -549,7 +458,6 @@ export class ArenaScene extends Phaser.Scene {
       hitFlashUntil: 0,
       healthBar,
       nameText,
-      localIndicator,
       trailEmitter,
       sparkEmitter,
     };
@@ -557,7 +465,7 @@ export class ArenaScene extends Phaser.Scene {
     return ship;
   }
 
-  private drawSimpleShipHull(g: Phaser.GameObjects.Graphics, color: number, isLocal: boolean): void {
+  private drawSimpleShipHull(g: Phaser.GameObjects.Graphics, color: number): void {
     g.clear();
 
     // ── 1. Clean Sleek Aerodynamic Dart Silhouette ───────────────────────────
@@ -594,7 +502,7 @@ export class ArenaScene extends Phaser.Scene {
     g.fillCircle(10.5, 13, 1.3);
 
     // ── 3. Crisp Neon Hull Vector Stroke ─────────────────────────────────────
-    g.lineStyle(isLocal ? 2.5 : 2, color, isLocal ? 1 : 0.9);
+    g.lineStyle(2.5, color, 1);
     g.strokePoints(hullPoints, true);
 
     // Subtle centerline keel spine
@@ -627,10 +535,6 @@ export class ArenaScene extends Phaser.Scene {
     // Detect incoming damage to trigger red hit flash and cockpit camera shake
     if (player.health < ship.lastHealth || player.shield < ship.lastShield) {
       ship.hitFlashUntil = Date.now() + 180;
-      if (ship.id === this.localPlayerId) {
-        this.cameras.main.shake(120, 0.012);
-        soundManager.playHit();
-      }
     }
     ship.lastHealth = player.health;
     ship.lastShield = player.shield;
@@ -685,11 +589,6 @@ export class ArenaScene extends Phaser.Scene {
       this.updateShipFlames(ship, time);
       this.updateShipShield(ship, time);
 
-      // Pulse local indicator
-      if (ship.localIndicator) {
-        ship.localIndicator.setAlpha(0.6 + 0.4 * Math.sin(time * 0.005));
-      }
-
       this.updateShipTrails(ship, delta);
     }
   }
@@ -704,8 +603,7 @@ export class ArenaScene extends Phaser.Scene {
 
     const speed = ship.speed;
     const throttle = Math.min(1, speed / SHIP_MAX_SPEED);
-    const isLocal = ship.id === this.localPlayerId;
-    const isBoosting = isLocal && this.inputManager.isBoosting();
+    const isBoosting = speed > SHIP_MAX_SPEED * 1.05;
 
     if (speed > 12 || isBoosting) {
       const baseLen = isBoosting ? 26 + throttle * 30 : 10 + throttle * 22;
@@ -750,28 +648,6 @@ export class ArenaScene extends Phaser.Scene {
       fg.fillStyle(0xffffff, idleAlpha * 0.8);
       fg.fillTriangle(-15, -8, -15, -6, -15 - idleLen * 0.5, -7);
       fg.fillTriangle(-15, 6, -15, 8, -15 - idleLen * 0.5, 7);
-    }
-
-    // ── Space Physics RCS Steering Thrusters ────────────────────────────────
-    // If local player is braking or strafing, show cold-gas RCS thruster jets
-    if (isLocal) {
-      const curInput = this.inputManager.getCurrentInput();
-      if (curInput.down) {
-        // Forward retro-braking thrusters at the nose (+X direction)
-        rcs.fillStyle(0x38bdf8, 0.85);
-        rcs.fillTriangle(20, -5, 20, -3, 26 + Math.random() * 4, -4);
-        rcs.fillTriangle(20, 3, 20, 5, 26 + Math.random() * 4, 4);
-      }
-      if (curInput.left) {
-        // Lateral RCS thruster on starboard wingtip
-        rcs.fillStyle(0x38bdf8, 0.8);
-        rcs.fillTriangle(-5, 21, -3, 21, -4, 27 + Math.random() * 4);
-      }
-      if (curInput.right) {
-        // Lateral RCS thruster on port wingtip
-        rcs.fillStyle(0x38bdf8, 0.8);
-        rcs.fillTriangle(-5, -21, -3, -21, -4, -27 - Math.random() * 4);
-      }
     }
   }
 
@@ -1234,23 +1110,13 @@ export class ArenaScene extends Phaser.Scene {
   // ── Interpolation & Local Prediction ──────────────────────────────────────
 
   private interpolateShips(delta: number): void {
+    const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
     for (const ship of this.ships.values()) {
-      if (ship.id === this.localPlayerId) {
-        // Snappy local position interpolation (smooth without lag delay)
-        const localFactor = Math.min(1, delta * 0.035);
-        ship.x = Phaser.Math.Linear(ship.x, ship.targetX, localFactor);
-        ship.y = Phaser.Math.Linear(ship.y, ship.targetY, localFactor);
-        ship.graphics.setPosition(ship.x, ship.y);
-        // Note: rotation is locked to instant mouse aiming in update()
-        this.inputManager.updateCamera(ship.x, ship.y, this.cameras.main.zoom);
-      } else {
-        const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
-        ship.x = Phaser.Math.Linear(ship.x, ship.targetX, factor);
-        ship.y = Phaser.Math.Linear(ship.y, ship.targetY, factor);
-        ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, factor);
-        ship.graphics.setPosition(ship.x, ship.y);
-        ship.shipVisualContainer.setRotation(ship.rotation);
-      }
+      ship.x = Phaser.Math.Linear(ship.x, ship.targetX, factor);
+      ship.y = Phaser.Math.Linear(ship.y, ship.targetY, factor);
+      ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, factor);
+      ship.graphics.setPosition(ship.x, ship.y);
+      ship.shipVisualContainer.setRotation(ship.rotation);
     }
   }
 
@@ -1294,66 +1160,38 @@ export class ArenaScene extends Phaser.Scene {
     return a + diff * t;
   }
 
-  // ── Camera & input ─────────────────────────────────────────────────────────
+  // ── Camera ─────────────────────────────────────────────────────────────────
 
+  private fitZoom(spanX: number, spanY: number): number {
+    const cam = this.cameras.main;
+    return Math.min(cam.width / spanX, cam.height / spanY);
+  }
+
+  /** Smoothly frames the bounding box of all living ships (whole arena when none). */
   private updateCamera(): void {
-    const localShip = this.localPlayerId ? this.ships.get(this.localPlayerId) : null;
-    const targetId =
-      localShip && localShip.alive ? this.localPlayerId : this.getSpectatorTarget();
-    const ship = targetId ? this.ships.get(targetId) : null;
-    if (ship) {
-      this.cameras.main.centerOn(ship.x, ship.y);
+    const cam = this.cameras.main;
+    const alive = [...this.ships.values()].filter((s) => s.alive);
+    let minX = 0;
+    let minY = 0;
+    let maxX = ARENA_WIDTH;
+    let maxY = ARENA_HEIGHT;
+    if (alive.length > 0) {
+      minX = Math.min(...alive.map((s) => s.x)) - CAMERA_PADDING;
+      maxX = Math.max(...alive.map((s) => s.x)) + CAMERA_PADDING;
+      minY = Math.min(...alive.map((s) => s.y)) - CAMERA_PADDING;
+      maxY = Math.max(...alive.map((s) => s.y)) + CAMERA_PADDING;
     }
-  }
-
-  private getSpectatorTarget(): string | null {
-    const alive = [...this.ships.values()].filter((s) => {
-      const player = this.latestSnapshot?.players.find((p) => p.id === s.id);
-      return player?.alive;
-    });
-    if (alive.length === 0) return null;
-    return alive[this.spectatorIndex % alive.length]!.id;
-  }
-
-  private startSpectating(): void {
-    this.spectatorIndex = 0;
-    soundManager.playExplosion();
-  }
-
-  nextSpectatorTarget(): void {
-    this.spectatorIndex++;
-  }
-
-  prevSpectatorTarget(): void {
-    this.spectatorIndex = Math.max(0, this.spectatorIndex - 1);
-  }
-
-  getCurrentSpectatorTargetName(): string | null {
-    const targetId = this.getSpectatorTarget();
-    if (!targetId) return null;
-    const player = this.latestSnapshot?.players.find((p) => p.id === targetId);
-    return player?.displayName ?? null;
-  }
-
-  private handleLocalInput(input: PlayerInput): void {
-    input.aimAngle = this.inputManager.getFacingAngle();
-    socketClient.sendInput(input);
-    if (input.shooting && this.localPlayerId) {
-      const localPlayer = this.latestSnapshot?.players.find(
-        (p) => p.id === this.localPlayerId,
-      );
-      if (localPlayer?.alive) {
-        const now = performance.now();
-        const hasRapidFire =
-          localPlayer.upgrades.RAPID_FIRE !== undefined &&
-          localPlayer.upgrades.RAPID_FIRE > Date.now();
-        const cooldown = hasRapidFire ? RAPID_FIRE_COOLDOWN_MS : FIRE_COOLDOWN_MS;
-        if (now - this.lastLaserSoundAt >= cooldown) {
-          this.lastLaserSoundAt = now;
-          soundManager.playLaser();
-        }
-      }
-    }
+    const spanX = Math.min(ARENA_WIDTH, Math.max(CAMERA_MIN_ZOOM_SPAN, maxX - minX));
+    const spanY = Math.min(ARENA_HEIGHT, Math.max(CAMERA_MIN_ZOOM_SPAN, maxY - minY));
+    const minZoom = this.fitZoom(ARENA_WIDTH, ARENA_HEIGHT);
+    const targetZoom = Math.max(minZoom, this.fitZoom(spanX, spanY));
+    cam.setZoom(Phaser.Math.Linear(cam.zoom, targetZoom, CAMERA_LERP));
+    const centerX = cam.midPoint.x;
+    const centerY = cam.midPoint.y;
+    cam.centerOn(
+      Phaser.Math.Linear(centerX, (minX + maxX) / 2, CAMERA_LERP * 2),
+      Phaser.Math.Linear(centerY, (minY + maxY) / 2, CAMERA_LERP * 2),
+    );
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
@@ -1361,7 +1199,6 @@ export class ArenaScene extends Phaser.Scene {
   shutdown(): void {
     this.unsubscribeSnapshot?.();
     this.unsubscribeEliminated?.();
-    this.inputManager.detach();
     for (const ship of this.ships.values()) {
       ship.graphics.destroy();
       ship.trailEmitter.destroy();

@@ -1,5 +1,8 @@
 import type {
+  ControllerState,
   CosmicEventState,
+  HapticPayload,
+  RoomClosedPayload,
   GameSnapshot,
   KillFeedEntry,
   MatchResult,
@@ -18,6 +21,9 @@ export interface GameEvents {
   'match:finished': MatchResult;
   'player:eliminated': KillFeedEntry;
   'cosmic:event': CosmicEventState;
+  'controller:state': ControllerState;
+  'controller:haptic': HapticPayload;
+  'room:closed': RoomClosedPayload;
   'connection:status': { connected: boolean; latencyMs?: number };
   'error': { message: string };
 }

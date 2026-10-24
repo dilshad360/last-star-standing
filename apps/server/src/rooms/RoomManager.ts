@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { MAX_PLAYERS_PER_ROOM, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '@lss/shared';
+import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from '@lss/shared';
 import { GameRoom, type SimulationFactory, type TypedServer } from './GameRoom.js';
 
 export class RoomManager {
@@ -32,7 +32,7 @@ export class RoomManager {
     throw new Error('Unable to allocate a unique room code.');
   }
 
-  createRoom(options?: { isCustom?: boolean }): GameRoom {
+  createRoom(): GameRoom {
     const code = this.generateRoomCode();
     const room = new GameRoom(
       code,
@@ -40,25 +40,12 @@ export class RoomManager {
       (empty) => this.rooms.delete(empty.code),
       this.simulationFactory,
     );
-    if (options?.isCustom) {
-      room.isCustom = true;
-    }
     this.rooms.set(code, room);
     return room;
   }
 
   getRoom(code: string): GameRoom | undefined {
     return this.rooms.get(code);
-  }
-
-  /** Finds a non-custom LOBBY room with an open human slot for Quick Play matchmaking. */
-  findQuickPlayRoom(): GameRoom | undefined {
-    for (const room of this.rooms.values()) {
-      if (!room.isCustom && room.status === 'LOBBY' && room.humans.length < MAX_PLAYERS_PER_ROOM) {
-        return room;
-      }
-    }
-    return undefined;
   }
 
   removeRoom(code: string): void {

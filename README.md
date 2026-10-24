@@ -12,14 +12,14 @@
 
 ## 🌌 Overview
 
-**Last Star Standing** is an authoritative, zero-asset-dependency multiplayer space battle royale. Up to 8 pilots battle across a hazardous 2400×2400 arena featuring procedural asteroids, plasma pickups, dynamic safe-zone storm shrinking, autonomous AI bot pilots, and periodic cosmic anomalies (*Meteor Showers*, *Solar Surges*, and *Supply Drops*).
+**Last Star Standing** is a party game for one big screen and up to 8 phones. The host opens the game on a TV or laptop and creates a room. Everyone scans the QR code and flies their own ship using their phone as a controller (virtual joystick or tilt). It's a free-for-all: destroyed ships respawn after 3 seconds, and whoever has the most kills when the 3-minute timer ends wins.
 
 ### Key Architectural Highlights
-- **100% Procedural Audio & Visuals:** Zero external image or audio files. Procedural neon vector starships with dual dynamic exhaust flames, world-space trailing wake ribbons, and Web Audio API synthesized sound effects.
-- **Server Authority:** The Node.js server runs a strict 25 Hz (`40 ms`) simulation loop in memory. Clients only send sanitized input intents (`input:update`).
-- **React ↔ Phaser Decoupling:** Phaser 3 renders the 60 fps canvas with snapshot interpolation and shortest-arc angle wrapping, while React renders the HUD and screens via a typed EventBus.
-- **Instant Mobile & Judge Onboarding:** Inline SVG QR code and 4-character room codes (`?room=CODE` auto-join link) for instant mobile scanning and testing.
-- **Autonomous AI Bot Pilots (`BotController`):** Autonomous AI ships that seek safe zones, collect pickups, dodge boundaries, and engage enemies so games can start instantly with any number of players.
+- **Host screen + phone controllers:** The big screen renders the Phaser arena and is not a ship. Phones only send input and receive a small status update (health, kills, rank, respawn timer) plus vibration cues. Phaser never runs on a phone.
+- **Server Authority:** The Node.js server runs a strict 25 Hz (`40 ms`) simulation loop in memory. Phones only send sanitized input intents (`input:update`, analog `moveX`/`moveY`).
+- **Reconnect-friendly:** Phones get a player token, so a locked screen or a Wi-Fi blip reclaims the same ship within 60 s. The host screen can resume its room within 30 s.
+- **100% Procedural Audio & Visuals:** No external image or audio files. Neon vector ships and Web Audio synthesized effects.
+- **Optional AI Bot Pilots (`BotController`):** The host can add 0-7 bots to fill empty slots or to play solo.
 
 ---
 
@@ -32,7 +32,7 @@ DevinHacks/
 ├── apps/
 │   ├── server/          # @lss/server: Express + Socket.IO 25 Hz authoritative game server
 │   └── web/             # @lss/web: Vite + React + Phaser 3 client with Web Audio synth
-├── phases/              # Step-by-step phased development blueprints (Phases 1-6)
+├── phases/              # Original single-device build blueprints (historical)
 ├── render.yaml          # Free-tier cloud deployment blueprint (Render Web Service + Static Site)
 └── package.json         # Workspaces root
 ```
@@ -55,7 +55,7 @@ npm install
 # Typecheck all workspaces (@lss/shared, @lss/server, @lss/web)
 npm run typecheck
 
-# Run all unit tests, simulation tests, and Socket.IO E2E tests (52+ tests)
+# Run all unit tests, simulation tests, and Socket.IO room tests
 npm test
 
 # Verify production build
@@ -64,43 +64,35 @@ npm run build
 
 ### 3. Start Development Servers
 ```bash
-npm run dev
+npm run dev          # http://localhost:5173
+npm run dev:https    # https://<your-LAN-IP>:5173 (needed for tilt + keep-awake on phones)
 ```
-- **Web Client:** http://localhost:5173
+- **Host screen:** open the web client on the TV/laptop, ideally via its LAN IP so the QR code works for phones.
+- **Phone controller:** `/play?room=CODE` (this is what the QR code opens).
 - **Game Server:** http://localhost:3001 (Health check: http://localhost:3001/health)
 
----
-
-## 🎮 Flight Controls
-
-| Action | Desktop / Laptop | Mobile / Touchscreen |
-| :--- | :--- | :--- |
-| **Thrust Forward** | `W` or `Up Arrow` | Left-side Virtual Joystick (drag up) |
-| **Strafe / Turn** | `A` / `D` or `◀` / `▶` | Left-side Virtual Joystick (drag horizontal) |
-| **Decelerate / Reverse** | `S` or `Down Arrow` | Left-side Virtual Joystick (drag down) |
-| **Aim Direction** | Mouse Cursor (World Space) | Ship Facing Heading |
-| **Fire Laser Cannons** | `Left Click` or `Space` | Right-side Screen Touch |
-| **Audio Mute Toggle** | `M` Key or HUD button | HUD Audio button |
-| **Spectate Switch** | `A` (Prev) / `D` (Next) | `◀ PREV` / `NEXT ▶` buttons |
+Phones only allow tilt (`DeviceOrientation`) and the Screen Wake Lock on HTTPS pages. `npm run dev:https` uses a self-signed certificate, so accept the browser warning once on each phone.
 
 ---
 
-## ⏱️ 2-Minute Hackathon Judge Demo Script
+## 🎮 Phone Controls
 
-1. **Launch Game:** Run `npm run dev` and open `http://localhost:5173`.
-2. **Instant Quick Play:** Enter your callsign (e.g. `Maverick`) and click **QUICK PLAY (5 BOTS)**.
-3. **Combat Flight:**
-   - Use `WASD` to accelerate and observe the **twin animated rocket exhaust flames** and **glowing plasma wake trails** curving behind your ship.
-   - Aim with the mouse and press `Space` or `Left Click` to fire glowing laser bolts.
-   - Shatter floating asteroids to collect glowing upgrade pods (`SHIELD`, `RAPID_FIRE`, `REPAIR`, `ENERGY`).
-4. **Multiplayer Lobby & QR Code:**
-   - Open a second browser tab (or mobile device) at `http://localhost:5173`.
-   - In Tab 1, click **Create Room**. Scan the inline SVG QR code or copy the share link into Tab 2.
-   - Notice Tab 2 connects to the same room code instantly.
-   - Adjust the **AI Bot Pilots slider** (`0–7` bots), click **Ready**, and watch the 3-2-1 countdown launch both players into the arena simultaneously.
-5. **Safe Zone & Victory:**
-   - Observe the safe-zone storm perimeter shrinking with glowing hazard rings and screen-edge alerts.
-   - Battle until one pilot survives to see the **Winner Scoreboard** with placement ranks, kills, damage dealt, and the **Play Again** instant rematch button.
+| Action | Phone |
+| :--- | :--- |
+| **Fly** | Left joystick: the ship turns toward where you push and thrusts harder the further you push |
+| **Tilt steering** | Tap **Tilt** and tilt the phone in the direction you want to fly. **Recenter** sets the current pose as neutral |
+| **Fire** | Big red button (hold) |
+| **Boost** | Amber button (hold) |
+
+---
+
+## ⏱️ 2-Minute Demo Script
+
+1. Run `npm run dev:https` and open `https://<LAN-IP>:5173` on the laptop/TV. Click **HOST A GAME**.
+2. Scan the QR code with 2 or more phones, enter names, and tap **JOIN GAME**. Each phone shows its ship color.
+3. Optionally add AI pilots, then click **START MATCH** on the big screen.
+4. Fly with the joystick or switch to tilt. Shoot asteroids for pickups (`SHIELD`, `RAPID_FIRE`, `REPAIR`, `ENERGY`, `TRIPLE_SHOT`, `EMP_BLAST`).
+5. When the timer ends, the big screen shows the scoreboard and each phone shows its placement. **PLAY AGAIN** starts the next round.
 
 ---
 
@@ -113,7 +105,7 @@ Deploy both the backend Socket.IO server and static web frontend using the inclu
 3. Select your repository — Render automatically provisions:
    - `last-star-standing-server` (Node.js Web Service on port `10000`)
    - `last-star-standing-web` (Static Site built from `apps/web/dist`)
-4. Done! Your multiplayer battle royale is live with WebSockets and SSL enabled.
+4. Done! Your party game is live with WebSockets and SSL enabled.
 
 ---
 

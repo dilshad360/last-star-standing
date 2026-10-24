@@ -14,11 +14,13 @@ import {
   ARENA_CENTER_X,
   ARENA_CENTER_Y,
   COUNTDOWN_DURATION_MS,
+  HOST_RECONNECT_GRACE_MS,
+  INPUT_STALE_MS,
   MATCH_TIMEOUT_MS,
   MAX_BOTS_PER_ROOM,
   MAX_PLAYERS_PER_ROOM,
+  PLAYER_RECONNECT_GRACE_MS,
   SAFE_ZONE_INITIAL_RADIUS,
-  SAFE_ZONE_STAGES,
   SHIP_MAX_HEALTH,
   SPAWN_RING_RADIUS,
   SPAWN_SHIELD_MS,
@@ -28,19 +30,21 @@ export type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 
 export interface RoomPlayer {
   id: string;
-  /** Null for bots and for humans whose socket has disconnected. */
+  /** Secret a phone presents to reclaim this ship after a reconnect; null for bots. */
+  token: string | null;
+  /** Null for bots and for phones whose socket has disconnected. */
   socketId: string | null;
   displayName: string;
   isBot: boolean;
-  isReady: boolean;
   isConnected: boolean;
   colorIndex: number;
   latestInput: PlayerInput | null;
+  latestInputAt: number;
 }
 
 /**
- * Attached to a room when it enters ACTIVE. Phase 3 supplies the real
- * WorldSimulation; the factory pattern keeps GameRoom dependency-free.
+ * Attached to a room when it enters ACTIVE. The factory pattern keeps
+ * GameRoom independent of WorldSimulation.
  */
 export interface MatchSimulation {
   /** Called once when the room goes ACTIVE; returns the initial snapshot. */
@@ -67,15 +71,24 @@ const BOT_NAMES = [
 
 const MIN_SHIPS_TO_START = 2;
 
+type ServerEvent = keyof ServerToClientEvents;
+
+/**
+ * A party room owned by one big screen (the host). The host renders the
+ * arena but is not a ship; every phone that joins controls one ship.
+ */
 export class GameRoom {
   readonly code: string;
   readonly createdAt = Date.now();
+  readonly hostChannel: string;
   status: MatchStatus = 'LOBBY';
-  hostPlayerId = '';
   matchStartedAt: number | null = null;
-  isCustom = false;
+  hostSocketId: string | null = null;
+  hostToken = '';
 
   private readonly players = new Map<string, RoomPlayer>();
+  private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private hostGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private botSeq = 0;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
   private simulation: MatchSimulation | null = null;
@@ -88,6 +101,7 @@ export class GameRoom {
     private readonly simulationFactory?: SimulationFactory,
   ) {
     this.code = code;
+    this.hostChannel = `host:${code}`;
   }
 
   // ── Queries ──────────────────────────────────────────────────────────────
@@ -111,16 +125,29 @@ export class GameRoom {
     return this.players.size;
   }
 
+  get isClosed(): boolean {
+    return this.destroyed;
+  }
+
   getPlayer(playerId: string): RoomPlayer | undefined {
     return this.players.get(playerId);
+  }
+
+  findPlayerByToken(token: string): RoomPlayer | undefined {
+    return this.humans.find((p) => p.token === token);
+  }
+
+  /** Latest input, or null once it is older than INPUT_STALE_MS. */
+  getFreshInput(playerId: string, now = Date.now()): PlayerInput | null {
+    const player = this.players.get(playerId);
+    if (!player?.latestInput || !player.isConnected) return null;
+    return now - player.latestInputAt <= INPUT_STALE_MS ? player.latestInput : null;
   }
 
   toRoomInfo(): RoomInfo {
     const players: RoomPlayerInfo[] = this.playerList.map((p) => ({
       id: p.id,
       displayName: p.displayName,
-      isHost: p.id === this.hostPlayerId,
-      isReady: p.isReady,
       isBot: p.isBot,
       isConnected: p.isConnected,
       colorIndex: p.colorIndex,
@@ -128,92 +155,143 @@ export class GameRoom {
     return {
       code: this.code,
       status: this.status,
-      hostPlayerId: this.hostPlayerId,
+      hostConnected: this.hostSocketId !== null,
       players,
       botCount: this.bots.length,
       maxPlayers: MAX_PLAYERS_PER_ROOM,
       createdAt: this.createdAt,
-      isCustom: this.isCustom,
     };
   }
 
   broadcast(): void {
+    if (this.destroyed) return;
     this.io.to(this.code).emit('room:updated', this.toRoomInfo());
   }
 
-  // ── Membership ───────────────────────────────────────────────────────────
+  emitToHost<E extends ServerEvent>(
+    event: E,
+    ...args: Parameters<ServerToClientEvents[E]>
+  ): void {
+    (this.io.to(this.hostChannel).emit as (e: string, ...a: unknown[]) => boolean)(
+      event,
+      ...args,
+    );
+  }
+
+  emitToPlayer<E extends ServerEvent>(
+    playerId: string,
+    event: E,
+    ...args: Parameters<ServerToClientEvents[E]>
+  ): void {
+    const socketId = this.players.get(playerId)?.socketId;
+    if (!socketId) return;
+    (this.io.to(socketId).emit as (e: string, ...a: unknown[]) => boolean)(event, ...args);
+  }
+
+  // ── Host screen ──────────────────────────────────────────────────────────
+  attachHost(socketId: string, token: string): void {
+    this.hostSocketId = socketId;
+    this.hostToken = token;
+    if (this.hostGraceTimer) {
+      clearTimeout(this.hostGraceTimer);
+      this.hostGraceTimer = null;
+    }
+    this.broadcast();
+  }
+
+  /** Host socket dropped: keep the room alive briefly so the screen can resume. */
+  detachHost(): void {
+    if (this.destroyed) return;
+    this.hostSocketId = null;
+    if (this.hostGraceTimer) clearTimeout(this.hostGraceTimer);
+    this.hostGraceTimer = setTimeout(
+      () => this.close('The host screen left the game.'),
+      HOST_RECONNECT_GRACE_MS,
+    );
+    this.hostGraceTimer.unref?.();
+    this.broadcast();
+  }
+
+  close(reason: string): void {
+    if (this.destroyed) return;
+    this.io.to(this.code).emit('room:closed', { reason });
+    this.destroy();
+  }
+
+  // ── Controllers ──────────────────────────────────────────────────────────
   addPlayer(player: {
     id: string;
+    token: string;
     socketId: string;
     displayName: string;
   }): RoomResult<{ player: RoomPlayer }> {
     if (this.destroyed) {
       return { ok: false, code: 'ROOM_NOT_FOUND', error: 'Room is closed.' };
     }
-    if (this.status !== 'LOBBY') {
-      return {
-        ok: false,
-        code: 'MATCH_IN_PROGRESS',
-        error: 'A match is already in progress in this room.',
-      };
-    }
     if (this.shipCount >= MAX_PLAYERS_PER_ROOM && !this.removeOneBot()) {
       return {
         ok: false,
         code: 'ROOM_FULL',
-        error: 'Room is full (8 ships).',
+        error: `Room is full (${MAX_PLAYERS_PER_ROOM} ships).`,
       };
     }
 
     const roomPlayer: RoomPlayer = {
       id: player.id,
+      token: player.token,
       socketId: player.socketId,
       displayName: player.displayName,
       isBot: false,
-      isReady: false,
       isConnected: true,
       colorIndex: this.nextFreeColorIndex(),
       latestInput: null,
+      latestInputAt: 0,
     };
     this.players.set(player.id, roomPlayer);
-    if (!this.hostPlayerId) this.hostPlayerId = player.id;
     return { ok: true, player: roomPlayer };
   }
 
-  /** Explicit leave or socket disconnect — identical server-side handling. */
-  removePlayer(playerId: string): void {
+  /** Re-binds a returning phone to its existing ship. */
+  reconnectPlayer(player: RoomPlayer, socketId: string, displayName?: string): void {
+    this.clearGraceTimer(player.id);
+    player.socketId = socketId;
+    player.isConnected = true;
+    player.latestInput = null;
+    if (displayName) player.displayName = displayName;
+  }
+
+  /** Phone socket dropped: hold its slot for PLAYER_RECONNECT_GRACE_MS. */
+  disconnectPlayer(playerId: string): void {
     const player = this.players.get(playerId);
     if (!player || player.isBot) return;
-
-    if (this.status === 'LOBBY' || this.status === 'COUNTDOWN') {
-      this.players.delete(playerId);
-    } else {
-      // ACTIVE/FINISHED: keep the ship for the simulation/results, mark gone.
-      player.isConnected = false;
-      player.socketId = null;
-    }
-
-    if (this.hostPlayerId === playerId) {
-      this.hostPlayerId = this.connectedHumans[0]?.id ?? '';
-    }
-    this.checkEmpty();
+    player.isConnected = false;
+    player.socketId = null;
+    player.latestInput = null;
+    this.clearGraceTimer(playerId);
+    const timer = setTimeout(() => this.removePlayer(playerId), PLAYER_RECONNECT_GRACE_MS);
+    timer.unref?.();
+    this.graceTimers.set(playerId, timer);
     this.broadcast();
   }
 
-  setReady(playerId: string, ready: boolean): boolean {
+  /** Explicit leave or expired reconnect grace. */
+  removePlayer(playerId: string): void {
     const player = this.players.get(playerId);
-    if (!player || player.isBot) return false;
-    player.isReady = ready;
-    return true;
+    if (!player || player.isBot) return;
+    this.clearGraceTimer(playerId);
+    this.players.delete(playerId);
+    this.broadcast();
   }
 
-  setInput(playerId: string, input: PlayerInput): void {
+  setInput(playerId: string, input: PlayerInput, now = Date.now()): void {
     const player = this.players.get(playerId);
-    if (player && !player.isBot) player.latestInput = input;
+    if (!player || player.isBot) return;
+    player.latestInput = input;
+    player.latestInputAt = now;
   }
 
   // ── AI Bot Pilots ────────────────────────────────────────────────────────
-  /** Adjusts the bot roster toward `count`, clamped to fit the 8-ship cap. */
+  /** Adjusts the bot roster toward `count`, clamped to fit the ship cap. */
   applyBotCount(count: number): number {
     const clamped = Math.max(
       0,
@@ -228,13 +306,14 @@ export class GameRoom {
     const index = this.botSeq++;
     const bot: RoomPlayer = {
       id: `bot-${this.code}-${index}`,
+      token: null,
       socketId: null,
       displayName: `${BOT_NAMES[index % BOT_NAMES.length]} [AI]`,
       isBot: true,
-      isReady: true,
       isConnected: true,
       colorIndex: this.nextFreeColorIndex(),
       latestInput: null,
+      latestInputAt: 0,
     };
     this.players.set(bot.id, bot);
   }
@@ -248,7 +327,7 @@ export class GameRoom {
 
   // ── State machine: LOBBY → COUNTDOWN → ACTIVE → FINISHED → LOBBY ──────────
   startCountdown(): RoomResult {
-    if (this.status !== 'LOBBY') {
+    if (this.status !== 'LOBBY' && this.status !== 'FINISHED') {
       return {
         ok: false,
         code: 'INVALID_STATE',
@@ -259,7 +338,7 @@ export class GameRoom {
       return {
         ok: false,
         code: 'NOT_ENOUGH_PLAYERS',
-        error: 'Need at least 2 ships — add AI Bot Pilots or invite a friend.',
+        error: 'Need at least 2 ships: scan the QR code with another phone or add AI pilots.',
       };
     }
     this.status = 'COUNTDOWN';
@@ -268,10 +347,7 @@ export class GameRoom {
       .to(this.code)
       .emit('match:countdown', { startsAt, durationMs: COUNTDOWN_DURATION_MS });
     this.broadcast();
-    this.countdownTimer = setTimeout(
-      () => this.enterActive(),
-      COUNTDOWN_DURATION_MS,
-    );
+    this.countdownTimer = setTimeout(() => this.enterActive(), COUNTDOWN_DURATION_MS);
     return { ok: true };
   }
 
@@ -282,11 +358,11 @@ export class GameRoom {
     this.matchStartedAt = Date.now();
     this.simulation = this.simulationFactory?.(this) ?? null;
     const snapshot = this.simulation?.start() ?? this.buildBootstrapSnapshot();
-    this.io.to(this.code).emit('match:started', { snapshot });
+    this.emitToHost('match:started', { snapshot });
     this.broadcast();
   }
 
-  /** Called by the simulation (Phase 3) when a winner is resolved. */
+  /** Called by the simulation when the round timer expires. */
   finishMatch(result: MatchResult): void {
     if (this.status !== 'ACTIVE') return;
     this.simulation?.stop();
@@ -307,7 +383,6 @@ export class GameRoom {
     this.simulation = null;
     this.status = 'LOBBY';
     this.matchStartedAt = null;
-    for (const player of this.humans) player.isReady = false;
     this.broadcast();
     return { ok: true };
   }
@@ -321,27 +396,29 @@ export class GameRoom {
     return 0;
   }
 
-  private checkEmpty(): void {
-    if (this.destroyed || this.connectedHumans.length > 0) return;
-    this.destroy();
+  private clearGraceTimer(playerId: string): void {
+    const timer = this.graceTimers.get(playerId);
+    if (timer) clearTimeout(timer);
+    this.graceTimers.delete(playerId);
   }
 
   private destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    if (this.countdownTimer) {
-      clearTimeout(this.countdownTimer);
-      this.countdownTimer = null;
-    }
+    if (this.countdownTimer) clearTimeout(this.countdownTimer);
+    if (this.hostGraceTimer) clearTimeout(this.hostGraceTimer);
+    for (const timer of this.graceTimers.values()) clearTimeout(timer);
+    this.countdownTimer = null;
+    this.hostGraceTimer = null;
+    this.graceTimers.clear();
     this.simulation?.stop();
     this.simulation = null;
     this.onEmpty(this);
   }
 
   /**
-   * Placeholder ACTIVE-state snapshot used until Phase 3 attaches the real
-   * WorldSimulation via the factory. Ships spawn on the radial ring with the
-   * standard 2.5s spawn shield so clients already receive a valid contract.
+   * ACTIVE-state snapshot used when no simulation factory is attached
+   * (room-only tests). Ships spawn on the radial ring with a spawn shield.
    */
   private buildBootstrapSnapshot(): GameSnapshot {
     const now = Date.now();
@@ -363,7 +440,7 @@ export class GameRoom {
           colorIndex: p.colorIndex,
           x: ARENA_CENTER_X + Math.cos(angle) * SPAWN_RING_RADIUS,
           y: ARENA_CENTER_Y + Math.sin(angle) * SPAWN_RING_RADIUS,
-          rotation: angle + Math.PI / 2,
+          rotation: angle + Math.PI,
           velocityX: 0,
           velocityY: 0,
           health: SHIP_MAX_HEALTH,
@@ -371,6 +448,9 @@ export class GameRoom {
           shield: 0,
           alive: true,
           kills: 0,
+          deaths: 0,
+          respawnAt: null,
+          connected: p.isConnected,
           upgrades: {},
           spawnProtectedUntil: now + SPAWN_SHIELD_MS,
           lastInputSequence: 0,
@@ -386,7 +466,7 @@ export class GameRoom {
         targetRadius: SAFE_ZONE_INITIAL_RADIUS,
         stage: -1,
         isShrinking: false,
-        nextShrinkAt: now + (SAFE_ZONE_STAGES[0]?.delayMs ?? 30_000),
+        nextShrinkAt: null,
       },
       cosmicEvent: null,
       killFeed: [],

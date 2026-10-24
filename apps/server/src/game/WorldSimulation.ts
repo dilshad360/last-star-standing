@@ -1,6 +1,8 @@
 import type {
   AsteroidState,
+  ControllerState,
   CosmicEventState,
+  HapticKind,
   EliminationCause,
   GameSnapshot,
   KillFeedEntry,
@@ -15,6 +17,8 @@ import type {
   UpgradeType,
 } from '@lss/shared';
 import {
+  ANALOG_DEADZONE,
+  ANALOG_TURN_SPEED,
   ARENA_CENTER_X,
   ARENA_CENTER_Y,
   ARENA_HEIGHT,
@@ -26,6 +30,7 @@ import {
   ASTEROID_PICKUP_DROP_CHANCE,
   ASTEROID_RADIUS_MAX,
   ASTEROID_RADIUS_MIN,
+  CONTROLLER_STATE_EVERY_TICKS,
   EMP_DAMAGE,
   EMP_RADIUS,
   ENERGY_SPEED_MULTIPLIER,
@@ -44,7 +49,10 @@ import {
   PROJECTILE_SPEED,
   RAPID_FIRE_COOLDOWN_MS,
   REPAIR_HEAL_AMOUNT,
+  RESPAWN_DELAY_MS,
+  RESPAWN_MIN_DISTANCE,
   SAFE_ZONE_INITIAL_RADIUS,
+  SAFE_ZONE_SHRINKS,
   SAFE_ZONE_STAGES,
   SHIELD_ABSORB,
   SHIP_ACCELERATION,
@@ -68,7 +76,7 @@ import {
 } from '@lss/shared';
 import { BotController, type BotView } from './BotController.js';
 import { CosmicDirector } from './CosmicDirector.js';
-import type { GameRoom, MatchSimulation, TypedServer } from '../rooms/GameRoom.js';
+import type { GameRoom, MatchSimulation } from '../rooms/GameRoom.js';
 
 /** ownerId sentinel marking projectiles launched by a Meteor Shower. */
 export const METEOR_OWNER_ID = 'cosmic:meteor';
@@ -78,11 +86,12 @@ const ASTEROID_CONTACT_COOLDOWN_MS = 500;
 const ASTEROID_BOUNCE_RESTITUTION = 0.8;
 const METEOR_LIFETIME_MS = 8000;
 const PROJECTILE_DESPAWN_MARGIN = 60;
+const HIT_HAPTIC_COOLDOWN_MS = 250;
 
 // ── Host abstraction ─────────────────────────────────────────────────────────
 // The simulation never touches Socket.IO directly, which keeps it fully
 // headless-testable. `RoomSimulationHost` (bottom of file) adapts a live
-// GameRoom + io pair; tests provide their own in-memory host.
+// GameRoom; tests provide their own in-memory host.
 
 export interface SimulationRosterEntry {
   id: string;
@@ -101,6 +110,10 @@ export interface SimulationHost {
   emitElimination(entry: KillFeedEntry): void;
   emitCosmicEvent(event: CosmicEventState): void;
   finishMatch(result: MatchResult): void;
+  /** Compact per-phone status (optional for headless hosts). */
+  emitControllerState?(playerId: string, state: ControllerState): void;
+  /** Vibration cue for one phone (optional for headless hosts). */
+  emitHaptic?(playerId: string, kind: HapticKind): void;
 }
 
 export interface WorldSimulationOptions {
@@ -110,21 +123,24 @@ export interface WorldSimulationOptions {
   rng?: () => number;
   /** Simulation clock origin (defaults to Date.now()). */
   startTimeMs?: number;
+  /** Run the battle-royale shrinking ring (defaults to SAFE_ZONE_SHRINKS). */
+  safeZoneShrinks?: boolean;
 }
 
 /** PlayerState plus server-only bookkeeping (never sent over the wire). */
 export interface ShipState extends PlayerState {
   damageDealt: number;
   placement: number;
-  eliminatedAt: number | null;
   lastShotAt: number;
+  lastHitHapticAt: number;
   nextAsteroidDamageAt: number;
   bot: BotController | null;
   input: PlayerInput | null;
 }
 
 /**
- * Authoritative 25 Hz battle-royale world simulation. Fixed-step: every tick
+ * Authoritative 25 Hz free-for-all world simulation: destroyed ships respawn
+ * after RESPAWN_DELAY_MS and the most kills when the round timer ends wins. Fixed-step: every tick
  * advances the sim clock by exactly TICK_INTERVAL_MS so headless runs are
  * fully deterministic for a given RNG seed.
  */
@@ -148,6 +164,7 @@ export class WorldSimulation implements MatchSimulation {
   private readonly rng: () => number;
   private readonly manual: boolean;
   private readonly startTimeMs?: number;
+  private readonly safeZoneShrinks: boolean;
   private readonly director: CosmicDirector;
 
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -168,6 +185,7 @@ export class WorldSimulation implements MatchSimulation {
     this.manual = options.manual ?? false;
     this.rng = options.rng ?? Math.random;
     this.startTimeMs = options.startTimeMs;
+    this.safeZoneShrinks = options.safeZoneShrinks ?? SAFE_ZONE_SHRINKS;
     this.director = new CosmicDirector(this.rng);
   }
 
@@ -187,7 +205,9 @@ export class WorldSimulation implements MatchSimulation {
 
     this.spawnShips();
     this.spawnAsteroids();
-    this.safeZone.nextShrinkAt = this.now + (SAFE_ZONE_STAGES[0]?.delayMs ?? 0);
+    this.safeZone.nextShrinkAt = this.safeZoneShrinks
+      ? this.now + (SAFE_ZONE_STAGES[0]?.delayMs ?? 0)
+      : null;
     this.director.arm(this.now);
 
     if (!this.manual) {
@@ -212,6 +232,9 @@ export class WorldSimulation implements MatchSimulation {
     this.now += TICK_INTERVAL_MS;
     const dt = TICK_INTERVAL_MS / 1000;
 
+    // 0. Late joiners, leavers, phone disconnects, and respawns.
+    this.syncRoster();
+    this.updateRespawns();
     // 1. AI Bot Pilot decisions.
     this.updateBotInputs();
     // 2. Movement, damping, boundary clamping, upgrade expiry.
@@ -234,12 +257,14 @@ export class WorldSimulation implements MatchSimulation {
       spawnPickup: (type, x, y) => this.spawnPickupAt(type, x, y),
       broadcast: (event) => this.host.emitCosmicEvent(event),
     });
-    // 9. Disconnect culls + win/timeout resolution.
-    this.cullDisconnectedShips();
+    // 9. Round timer resolution.
     this.checkMatchEnd();
 
     const snapshot = this.buildSnapshot();
     this.host.emitSnapshot(snapshot);
+    if (this.finished || this.tickCount % CONTROLLER_STATE_EVERY_TICKS === 0) {
+      this.emitControllerStates();
+    }
     if (this.finished) this.stop();
     return snapshot;
   }
@@ -251,35 +276,134 @@ export class WorldSimulation implements MatchSimulation {
     const angularOffset = this.rng() * Math.PI * 2;
     roster.forEach((entry, index) => {
       const angle = angularOffset + (index * Math.PI * 2) / roster.length;
-      const ship: ShipState = {
-        id: entry.id,
-        displayName: entry.displayName,
-        isBot: entry.isBot,
-        colorIndex: entry.colorIndex,
-        x: ARENA_CENTER_X + Math.cos(angle) * SPAWN_RING_RADIUS,
-        y: ARENA_CENTER_Y + Math.sin(angle) * SPAWN_RING_RADIUS,
-        // Face the arena center.
-        rotation: angle + Math.PI,
-        velocityX: 0,
-        velocityY: 0,
-        health: SHIP_MAX_HEALTH,
-        maxHealth: SHIP_MAX_HEALTH,
-        shield: 0,
-        alive: true,
-        kills: 0,
-        upgrades: {},
-        spawnProtectedUntil: this.now + SPAWN_SHIELD_MS,
-        lastInputSequence: 0,
-        damageDealt: 0,
-        placement: 0,
-        eliminatedAt: null,
-        lastShotAt: -Infinity,
-        nextAsteroidDamageAt: 0,
-        bot: entry.isBot ? new BotController(this.rng) : null,
-        input: null,
-      };
+      const ship = this.createShip(entry);
+      ship.x = ARENA_CENTER_X + Math.cos(angle) * SPAWN_RING_RADIUS;
+      ship.y = ARENA_CENTER_Y + Math.sin(angle) * SPAWN_RING_RADIUS;
+      // Face the arena center.
+      ship.rotation = angle + Math.PI;
       this.ships.set(ship.id, ship);
     });
+  }
+
+  private createShip(entry: SimulationRosterEntry): ShipState {
+    return {
+      id: entry.id,
+      displayName: entry.displayName,
+      isBot: entry.isBot,
+      colorIndex: entry.colorIndex,
+      x: ARENA_CENTER_X,
+      y: ARENA_CENTER_Y,
+      rotation: 0,
+      velocityX: 0,
+      velocityY: 0,
+      health: SHIP_MAX_HEALTH,
+      maxHealth: SHIP_MAX_HEALTH,
+      shield: 0,
+      alive: true,
+      kills: 0,
+      deaths: 0,
+      respawnAt: null,
+      connected: entry.isBot || this.host.isConnected(entry.id),
+      upgrades: {},
+      spawnProtectedUntil: this.now + SPAWN_SHIELD_MS,
+      lastInputSequence: 0,
+      damageDealt: 0,
+      placement: 0,
+      lastShotAt: -Infinity,
+      lastHitHapticAt: -Infinity,
+      nextAsteroidDamageAt: 0,
+      bot: entry.isBot ? new BotController(this.rng) : null,
+      input: null,
+    };
+  }
+
+  /** Picks a point inside the safe ring that is far from living ships. */
+  private findSpawnPoint(): { x: number; y: number } {
+    const others = this.aliveShips();
+    const maxRadius = Math.max(0, this.safeZone.radius - SHIP_RADIUS * 4);
+    let best = { x: this.safeZone.centerX, y: this.safeZone.centerY };
+    let bestScore = -Infinity;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const angle = this.rng() * Math.PI * 2;
+      const dist = Math.sqrt(this.rng()) * maxRadius;
+      const x = Math.min(
+        ARENA_WIDTH - SHIP_RADIUS * 3,
+        Math.max(SHIP_RADIUS * 3, this.safeZone.centerX + Math.cos(angle) * dist),
+      );
+      const y = Math.min(
+        ARENA_HEIGHT - SHIP_RADIUS * 3,
+        Math.max(SHIP_RADIUS * 3, this.safeZone.centerY + Math.sin(angle) * dist),
+      );
+      const nearest = others.reduce(
+        (min, s) => Math.min(min, Math.hypot(s.x - x, s.y - y)),
+        Infinity,
+      );
+      if (nearest >= RESPAWN_MIN_DISTANCE) return { x, y };
+      if (nearest > bestScore) {
+        bestScore = nearest;
+        best = { x, y };
+      }
+    }
+    return best;
+  }
+
+  private respawn(ship: ShipState): void {
+    const point = this.findSpawnPoint();
+    ship.x = point.x;
+    ship.y = point.y;
+    ship.rotation = Math.atan2(this.safeZone.centerY - point.y, this.safeZone.centerX - point.x);
+    ship.velocityX = 0;
+    ship.velocityY = 0;
+    ship.health = SHIP_MAX_HEALTH;
+    ship.shield = 0;
+    ship.upgrades = {};
+    ship.alive = true;
+    ship.respawnAt = null;
+    ship.input = null;
+    ship.spawnProtectedUntil = this.now + SPAWN_SHIELD_MS;
+    if (!ship.isBot) this.host.emitHaptic?.(ship.id, 'respawn');
+  }
+
+  /**
+   * Keeps ships in step with the room roster: phones that join mid-round get
+   * a ship, leavers are removed, and disconnected phones park their ship
+   * until they reconnect.
+   */
+  private syncRoster(): void {
+    const roster = this.host.listRoster();
+    const ids = new Set(roster.map((entry) => entry.id));
+    for (const id of [...this.ships.keys()]) {
+      if (!ids.has(id)) this.ships.delete(id);
+    }
+    for (const entry of roster) {
+      let ship = this.ships.get(entry.id);
+      if (!ship) {
+        ship = this.createShip(entry);
+        ship.alive = false;
+        ship.respawnAt = this.now;
+        this.ships.set(ship.id, ship);
+      }
+      if (ship.isBot) continue;
+      ship.displayName = entry.displayName;
+      const connected = this.host.isConnected(ship.id);
+      if (connected === ship.connected) continue;
+      ship.connected = connected;
+      if (!connected) {
+        ship.alive = false;
+        ship.respawnAt = null;
+        ship.input = null;
+      } else if (!ship.alive) {
+        ship.respawnAt = this.now;
+      }
+    }
+  }
+
+  private updateRespawns(): void {
+    for (const ship of this.ships.values()) {
+      if (ship.alive || ship.respawnAt === null || ship.respawnAt > this.now) continue;
+      if (!ship.connected) continue;
+      this.respawn(ship);
+    }
   }
 
   private spawnAsteroids(): void {
@@ -404,8 +528,22 @@ export class WorldSimulation implements MatchSimulation {
             ship.velocityX += (ax / len) * (SHIP_ACCELERATION * accelMultiplier) * dt;
             ship.velocityY += (ay / len) * (SHIP_ACCELERATION * accelMultiplier) * dt;
           }
+        } else if (input.moveX !== undefined && input.moveY !== undefined) {
+          // Phone stick/tilt: steer the nose toward the stick, thrust by deflection.
+          const magnitude = Math.min(1, Math.hypot(input.moveX, input.moveY));
+          if (magnitude > ANALOG_DEADZONE) {
+            const target = Math.atan2(input.moveY, input.moveX);
+            let diff = target - ship.rotation;
+            diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+            const maxTurn = ANALOG_TURN_SPEED * dt;
+            ship.rotation += Math.max(-maxTurn, Math.min(maxTurn, diff));
+            const throttle =
+              ((magnitude - ANALOG_DEADZONE) / (1 - ANALOG_DEADZONE)) * accelMultiplier;
+            ship.velocityX += Math.cos(target) * SHIP_ACCELERATION * throttle * dt;
+            ship.velocityY += Math.sin(target) * SHIP_ACCELERATION * throttle * dt;
+          }
         } else {
-          // Human player: A/D steers left/right, W/S fires forward/reverse thrusters
+          // Boolean fallback: left/right steers, up/down fires forward/reverse thrusters
           const turn = (input.right ? 1 : 0) - (input.left ? 1 : 0);
           if (turn !== 0) {
             ship.rotation += turn * SHIP_TURN_SPEED * dt;
@@ -829,6 +967,7 @@ export class WorldSimulation implements MatchSimulation {
   }
 
   private updateSafeZone(): void {
+    if (!this.safeZoneShrinks) return;
     const zone = this.safeZone;
     if (!zone.isShrinking) {
       if (zone.nextShrinkAt !== null && this.now >= zone.nextShrinkAt) {
@@ -880,16 +1019,6 @@ export class WorldSimulation implements MatchSimulation {
     }
   }
 
-  /** Humans whose sockets dropped mid-match are eliminated by the void. */
-  private cullDisconnectedShips(): void {
-    for (const ship of this.ships.values()) {
-      if (!ship.alive || ship.isBot) continue;
-      if (!this.host.isConnected(ship.id)) {
-        this.eliminate(ship, 'DISCONNECT', null);
-      }
-    }
-  }
-
   // ── Damage & elimination ─────────────────────────────────────────────────
 
   private applyDamage(
@@ -910,6 +1039,10 @@ export class WorldSimulation implements MatchSimulation {
       remaining -= absorbed;
     }
     ship.health -= remaining;
+    if (!ship.isBot && this.now - ship.lastHitHapticAt >= HIT_HAPTIC_COOLDOWN_MS) {
+      ship.lastHitHapticAt = this.now;
+      this.host.emitHaptic?.(ship.id, 'hit');
+    }
 
     if (opts.attackerId) {
       const attacker = this.ships.get(opts.attackerId);
@@ -929,18 +1062,21 @@ export class WorldSimulation implements MatchSimulation {
     killerId: string | null,
   ): void {
     if (!ship.alive || this.finished) return;
-    // Placement = number of ships still alive (incl. this one) at death.
-    ship.placement = this.aliveShips().length;
     ship.alive = false;
     ship.health = 0;
-    ship.eliminatedAt = this.now;
+    ship.deaths += 1;
+    ship.respawnAt = this.now + RESPAWN_DELAY_MS;
     ship.input = null;
     ship.shield = 0;
+    ship.velocityX = 0;
+    ship.velocityY = 0;
 
     const killer = killerId ? this.ships.get(killerId) : undefined;
-    if (killer && killer.alive && killer.id !== ship.id) {
+    if (killer && killer.id !== ship.id) {
       killer.kills += 1;
+      if (!killer.isBot) this.host.emitHaptic?.(killer.id, 'kill');
     }
+    if (!ship.isBot) this.host.emitHaptic?.(ship.id, 'killed');
 
     const entry: KillFeedEntry = {
       id: `kill-${++this.killSeq}`,
@@ -954,31 +1090,50 @@ export class WorldSimulation implements MatchSimulation {
     this.killFeed.push(entry);
     if (this.killFeed.length > KILL_FEED_LIMIT) this.killFeed.shift();
     this.host.emitElimination(entry);
-    // Resolve the win condition immediately: the last ship standing at the
-    // moment of this elimination wins, even if it would die later this tick.
-    this.checkMatchEnd();
+  }
+
+  /** Scoreboard order: kills, then fewest deaths, then damage dealt. */
+  rankedShips(): ShipState[] {
+    return [...this.ships.values()].sort(
+      (a, b) =>
+        b.kills - a.kills ||
+        a.deaths - b.deaths ||
+        b.damageDealt - a.damageDealt ||
+        a.id.localeCompare(b.id),
+    );
   }
 
   private checkMatchEnd(): void {
-    if (this.finished) return;
-    const alive = this.aliveShips();
-    if (alive.length <= 1) {
-      const winner = alive[0] ?? null;
-      if (winner) winner.placement = 1;
-      this.finish('LAST_SHIP_STANDING', winner?.id ?? null);
-      return;
-    }
-    if (this.elapsedMs >= MATCH_TIMEOUT_MS) {
-      // Timeout tiebreaker: kills → health → damage dealt.
-      const ranked = [...alive].sort(
-        (a, b) =>
-          b.kills - a.kills || b.health - a.health || b.damageDealt - a.damageDealt,
-      );
-      ranked.forEach((ship, index) => {
-        ship.placement = index + 1;
+    if (this.finished || this.elapsedMs < MATCH_TIMEOUT_MS) return;
+    const ranked = this.rankedShips();
+    ranked.forEach((ship, index) => {
+      ship.placement = index + 1;
+    });
+    this.finish('TIMEOUT', ranked[0]?.id ?? null);
+  }
+
+  private emitControllerStates(): void {
+    if (!this.host.emitControllerState) return;
+    const ranked = this.rankedShips();
+    const timeRemainingMs = Math.max(0, MATCH_TIMEOUT_MS - this.elapsedMs);
+    ranked.forEach((ship, index) => {
+      if (ship.isBot) return;
+      this.host.emitControllerState?.(ship.id, {
+        status: this.finished ? 'FINISHED' : 'ACTIVE',
+        alive: ship.alive,
+        health: Math.max(0, Math.round(ship.health)),
+        maxHealth: ship.maxHealth,
+        shield: Math.round(ship.shield),
+        kills: ship.kills,
+        deaths: ship.deaths,
+        rank: index + 1,
+        totalPlayers: ranked.length,
+        respawnAt: ship.respawnAt,
+        upgrades: { ...ship.upgrades },
+        timeRemainingMs,
+        serverTime: this.now,
       });
-      this.finish('TIMEOUT', ranked[0]?.id ?? null);
-    }
+    });
   }
 
   private finish(endReason: MatchEndReason, winnerId: string | null): void {
@@ -992,8 +1147,9 @@ export class WorldSimulation implements MatchSimulation {
         colorIndex: ship.colorIndex,
         placement: ship.placement,
         kills: ship.kills,
+        deaths: ship.deaths,
         damageDealt: Math.round(ship.damageDealt),
-        survivalTimeMs: (ship.eliminatedAt ?? this.now) - this.startedAt,
+        survivalTimeMs: this.now - this.startedAt,
       }))
       .sort((a, b) => a.placement - b.placement || a.playerId.localeCompare(b.playerId));
     const winner = winnerId ? this.ships.get(winnerId) : undefined;
@@ -1029,6 +1185,9 @@ export class WorldSimulation implements MatchSimulation {
       shield: ship.shield,
       alive: ship.alive,
       kills: ship.kills,
+      deaths: ship.deaths,
+      respawnAt: ship.respawnAt,
+      connected: ship.connected,
       upgrades: { ...ship.upgrades },
       spawnProtectedUntil: ship.spawnProtectedUntil,
       lastInputSequence: ship.lastInputSequence,
@@ -1058,10 +1217,7 @@ export class WorldSimulation implements MatchSimulation {
 // ── Live-room adapter ────────────────────────────────────────────────────────
 
 class RoomSimulationHost implements SimulationHost {
-  constructor(
-    private readonly room: GameRoom,
-    private readonly io: TypedServer,
-  ) {}
+  constructor(private readonly room: GameRoom) {}
 
   get roomCode(): string {
     return this.room.code;
@@ -1077,7 +1233,7 @@ class RoomSimulationHost implements SimulationHost {
   }
 
   getInput(playerId: string): PlayerInput | null {
-    return this.room.getPlayer(playerId)?.latestInput ?? null;
+    return this.room.getFreshInput(playerId);
   }
 
   isConnected(playerId: string): boolean {
@@ -1085,15 +1241,23 @@ class RoomSimulationHost implements SimulationHost {
   }
 
   emitSnapshot(snapshot: GameSnapshot): void {
-    this.io.to(this.room.code).emit('game:snapshot', snapshot);
+    this.room.emitToHost('game:snapshot', snapshot);
   }
 
   emitElimination(entry: KillFeedEntry): void {
-    this.io.to(this.room.code).emit('player:eliminated', entry);
+    this.room.emitToHost('player:eliminated', entry);
   }
 
   emitCosmicEvent(event: CosmicEventState): void {
-    this.io.to(this.room.code).emit('cosmic:event', event);
+    this.room.emitToHost('cosmic:event', event);
+  }
+
+  emitControllerState(playerId: string, state: ControllerState): void {
+    this.room.emitToPlayer(playerId, 'controller:state', state);
+  }
+
+  emitHaptic(playerId: string, kind: HapticKind): void {
+    this.room.emitToPlayer(playerId, 'controller:haptic', { kind });
   }
 
   finishMatch(result: MatchResult): void {
@@ -1102,6 +1266,6 @@ class RoomSimulationHost implements SimulationHost {
 }
 
 /** SimulationFactory used by RoomManager to attach a live match to a room. */
-export function createWorldSimulation(room: GameRoom, io: TypedServer): WorldSimulation {
-  return new WorldSimulation(new RoomSimulationHost(room, io));
+export function createWorldSimulation(room: GameRoom): WorldSimulation {
+  return new WorldSimulation(new RoomSimulationHost(room));
 }

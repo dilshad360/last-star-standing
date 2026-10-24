@@ -2,19 +2,25 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { CrosshairIcon, ZapIcon } from './icons.js';
 
 interface TouchControlsProps {
+  /** Normalized stick deflection: x/y in -1..1 (screen right/down positive). */
   onJoystick: (x: number, y: number, active: boolean) => void;
   onFire: (active: boolean) => void;
   onBoost: (active: boolean) => void;
   visible?: boolean;
+  /** Hide the stick (tilt steering) but keep Fire/Boost. */
+  hideJoystick?: boolean;
+  accentColor?: string;
 }
 
-const JOYSTICK_RADIUS = 44; // max knob travel radius in pixels
+const JOYSTICK_RADIUS = 62; // max knob travel radius in pixels
 
 export const TouchControls: React.FC<TouchControlsProps> = ({
   onJoystick,
   onFire,
   onBoost,
   visible = true,
+  hideJoystick = false,
+  accentColor = '#22d3ee',
 }) => {
   const [knobPos, setKnobPos] = useState({ x: 0, y: 0 });
   const [joystickActive, setJoystickActive] = useState(false);
@@ -57,7 +63,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         dy = (dy / dist) * JOYSTICK_RADIUS;
       }
       setKnobPos({ x: dx, y: dy });
-      onJoystick(dx, dy, true);
+      onJoystick(dx / JOYSTICK_RADIUS, dy / JOYSTICK_RADIUS, true);
     },
     [onJoystick]
   );
@@ -77,7 +83,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         dy = (dy / dist) * JOYSTICK_RADIUS;
       }
       setKnobPos({ x: dx, y: dy });
-      onJoystick(dx, dy, true);
+      onJoystick(dx / JOYSTICK_RADIUS, dy / JOYSTICK_RADIUS, true);
     },
     [onJoystick]
   );
@@ -167,6 +173,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       }}
     >
       {/* ── Left Virtual Joystick (Minimalist Glassmorphism) ─────────────── */}
+      {!hideJoystick && (
       <div
         ref={joystickBaseRef}
         className="touch-control"
@@ -178,10 +185,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           position: 'fixed',
           bottom: 'max(20px, env(safe-area-inset-bottom, 20px))',
           left: 'max(20px, env(safe-area-inset-left, 20px))',
-          width: 116,
-          height: 116,
+          width: 180,
+          height: 180,
           borderRadius: '50%',
-          border: `1.5px solid ${joystickActive ? '#22d3ee' : 'rgba(34, 211, 238, 0.3)'}`,
+          border: `2px solid ${joystickActive ? accentColor : 'rgba(148, 163, 184, 0.35)'}`,
           background: joystickActive ? 'rgba(8, 20, 44, 0.45)' : 'rgba(6, 12, 28, 0.25)',
           backdropFilter: 'blur(6px)',
           WebkitBackdropFilter: 'blur(6px)',
@@ -220,8 +227,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <div
           style={{
             position: 'absolute',
-            width: 44,
-            height: 44,
+            width: 66,
+            height: 66,
             borderRadius: '50%',
             background: joystickActive
               ? 'radial-gradient(circle, #67e8f9 0%, #0891b2 100%)'
@@ -250,6 +257,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         </div>
       </div>
 
+      )}
+
       {/* ── Right Action Buttons (Boost & Fire) ─────────────────────────── */}
       <div
         style={{
@@ -271,8 +280,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           onPointerUp={handleBoostUp}
           onPointerCancel={handleBoostUp}
           style={{
-            width: 56,
-            height: 56,
+            width: 84,
+            height: 84,
             borderRadius: '50%',
             border: `1.5px solid ${boostActive ? '#fbbf24' : 'rgba(251, 191, 36, 0.5)'}`,
             background: boostActive
@@ -290,7 +299,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
-            marginRight: 18,
+            marginRight: 40,
           }}
           aria-label="Afterburner Boost"
         >
@@ -316,8 +325,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           onPointerUp={handleFireUp}
           onPointerCancel={handleFireUp}
           style={{
-            width: 74,
-            height: 74,
+            width: 120,
+            height: 120,
             borderRadius: '50%',
             border: `2px solid ${fireActive ? '#f43f5e' : 'rgba(244, 63, 94, 0.6)'}`,
             background: fireActive

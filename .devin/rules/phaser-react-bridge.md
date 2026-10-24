@@ -10,9 +10,9 @@ globs:
 When working in `apps/web/**`, follow these frontend and game-loop rules:
 
 1. **Strict React ↔ Phaser Decoupling:**
-   - React manages screens (`Landing`, `Lobby`, `HUD`, `EliminatedOverlay`, `WinnerScreen`, `ConnectionBanner`).
-   - Phaser (`ArenaScene`) owns the `<canvas>`, 60 fps `update(time, delta)` loop, entity sprites/graphics, particle emitters, and camera follow.
-   - Never call React `setState` on every `game:snapshot` (25 times/sec) for the entire world state. Only emit throttled local-player HUD updates (`~10 Hz` or on change) and discrete events (`kill-feed`, `cosmic-event`, `match-finished`) across the typed `EventBus`.
+   - React manages screens: host (`HostApp`, `HostLobby`, `TvHud`, `HostResults`) and phone (`ControllerApp`, `TouchControls`).
+   - Phaser (`ArenaScene`) runs only on the host screen. It owns the `<canvas>`, the 60 fps `update(time, delta)` loop, entity graphics, particle emitters, and a camera that frames every living ship.
+   - Never call React `setState` on every `game:snapshot` (25 times/sec) for the entire world state. Only push throttled HUD updates (`≤10 Hz`) and discrete events (`kill-feed`, `cosmic-event`, `match-finished`) across the typed `EventBus`.
 
 2. **Snapshot Interpolation & Angle Wrapping:**
    - Interpolate ship and asteroid positions smoothly between server snapshots (`Phaser.Math.Linear`).

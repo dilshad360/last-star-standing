@@ -199,6 +199,9 @@ describe('contract structural invariants', () => {
           shield: 0,
           alive: true,
           kills: 0,
+          deaths: 0,
+          respawnAt: null,
+          connected: true,
           upgrades: {},
           spawnProtectedUntil: SPAWN_SHIELD_MS,
           lastInputSequence: 0,
@@ -260,7 +263,7 @@ describe('contract structural invariants', () => {
       roomCode: 'ABCD',
       winnerPlayerId: 'p1',
       winnerName: 'Nova',
-      endReason: 'LAST_SHIP_STANDING',
+      endReason: 'TIMEOUT',
       durationMs: 95_000,
       stats: [
         {
@@ -270,26 +273,25 @@ describe('contract structural invariants', () => {
           colorIndex: 0,
           placement: 1,
           kills: 3,
+          deaths: 1,
           damageDealt: 340,
           survivalTimeMs: 95_000,
         },
       ],
     };
     expect(result.stats[0]!.placement).toBe(1);
-    expect(result.endReason).toBe('LAST_SHIP_STANDING');
+    expect(result.endReason).toBe('TIMEOUT');
   });
 
   it('models room and input contracts used by socket events', () => {
     const room: RoomInfo = {
       code: 'ABCD',
       status: 'LOBBY',
-      hostPlayerId: 'p1',
+      hostConnected: true,
       players: [
         {
           id: 'p1',
           displayName: 'Nova',
-          isHost: true,
-          isReady: true,
           isBot: false,
           isConnected: true,
           colorIndex: 0,
@@ -307,8 +309,10 @@ describe('contract structural invariants', () => {
       aimAngle: Math.PI / 2,
       shooting: false,
       sequence: 1,
+      moveX: 0.5,
+      moveY: -0.5,
     };
-    expect(room.players[0]!.isHost).toBe(true);
+    expect(room.hostConnected).toBe(true);
     expect(input.up).toBe(true);
   });
 });

@@ -1,3 +1,5 @@
+> **Note:** This brief describes the original single-device battle royale. The game has pivoted to party mode (host screen + phone controllers, free-for-all with respawns). See `AGENTS.md` and `README.md` for the current rules.
+
 # Last Star Standing --- Project Brief
 
 **Document type:** Product + Technical Specification\

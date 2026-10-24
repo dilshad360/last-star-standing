@@ -1,7 +1,7 @@
 # Last Star Standing — Agentic Development Rules (`AGENTS.md`)
 
-**Project:** Last Star Standing (Browser-based 2D multiplayer space battle royale)  
-**Specification:** See `last_star_standing_project_brief.md` (v1.1)
+**Project:** Last Star Standing (party game: one host screen renders the arena, up to 8 phones are controllers, free-for-all with respawns)  
+**Specification:** `last_star_standing_project_brief.md` (v1.1) describes the original single-device battle royale. Where it conflicts with this file, the party-mode rules here win.
 
 ## Monorepo Architecture & Stack
 
@@ -12,7 +12,8 @@
 
 ## Core Invariants
 
-1. **Server Authority:** The server (`apps/server`) is the single source of truth for positions, velocities, projectile spawns, hit detection, asteroid destruction, pickups, safe-zone damage, AI bot actions, cosmic events, and winner determination. Clients only send input intents (`input:update`) and room lifecycle actions.
+1. **Server Authority:** The server (`apps/server`) is the single source of truth for positions, velocities, projectile spawns, hit detection, asteroid destruction, pickups, safe-zone damage, respawns, AI bot actions, cosmic events, and winner determination. Phones only send input intents (`input:update`); the host screen only sends room lifecycle actions (`host:create`, `room:setBots`, `match:start`, `match:restart`).
+5. **Host vs. Controller Roles:** The host screen owns the room and is not a ship. It alone receives `game:snapshot`, `match:started`, `player:eliminated`, and `cosmic:event`. Each phone receives only its own `controller:state` and `controller:haptic`. Phones never mount Phaser.
 2. **React ↔ Phaser Separation:** Never push 60 fps frame state through React state hooks. Phaser (`ArenaScene`) renders directly from the latest interpolated server snapshots (`game:snapshot`), while throttled or event-driven updates (HUD stats, kill feed, match state transitions) pass through a typed `EventBus`.
 3. **100% Procedural Visuals & Audio:** Do not depend on external image sprites or audio files that could fail to load. Render ships, thrusters, shields, asteroids, projectiles, and safe-zone rings via Phaser `Graphics`/particles, and synthesize sound effects via the Web Audio API (`SoundManager`).
 4. **Centralized Balance Config:** All gameplay balance values (arena size `2400x2400`, ship speed, cooldowns, damage, safe-zone stages, pickup durations) must live in `packages/shared/src/constants.ts`.

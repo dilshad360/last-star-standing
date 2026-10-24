@@ -2,20 +2,14 @@ import Phaser from 'phaser';
 import { ArenaScene } from './scenes/ArenaScene.js';
 
 /**
- * Creates and manages the Phaser 3 game instance.
+ * Creates and manages the Phaser 3 game instance on the host screen.
  * Mount to a DOM element via PhaserGame.mount(element).
  */
 export class PhaserGame {
   private game: Phaser.Game | null = null;
-  public currentLocalPlayerId: string | null = null;
 
-  mount(parent: HTMLElement, localPlayerId?: string): void {
-    this.currentLocalPlayerId = localPlayerId ?? null;
-    if (this.game) {
-      this.setLocalPlayerId(this.currentLocalPlayerId);
-      return;
-    }
-
+  mount(parent: HTMLElement): void {
+    if (this.game) return;
     this.game = new Phaser.Game({
       type: Phaser.AUTO,
       parent,
@@ -33,32 +27,13 @@ export class PhaserGame {
         pixelArt: false,
       },
     });
-
-    const setSceneId = () => {
-      const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
-      if (scene) {
-        scene.setLocalPlayerId(this.currentLocalPlayerId);
-      }
-    };
-
-    this.game.events.once(Phaser.Core.Events.READY, setSceneId);
-  }
-
-  setLocalPlayerId(id: string | null): void {
-    this.currentLocalPlayerId = id;
-    const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
-    scene?.setLocalPlayerId(id);
   }
 
   unmount(): void {
     // destroy() emits the scene 'shutdown' event → ArenaScene cleans up
-    // its EventBus subscriptions and DOM input listeners.
+    // its EventBus subscriptions.
     this.game?.destroy(true);
     this.game = null;
-  }
-
-  get scene(): ArenaScene | null {
-    return (this.game?.scene.getScene('ArenaScene') as ArenaScene) ?? null;
   }
 }
 

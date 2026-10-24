@@ -11,7 +11,8 @@
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev --workspace=@lss/server\" \"npm run dev --workspace=@lss/web\"",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "dev:https": "concurrently -n server,web -c cyan,magenta \"npm run dev --workspace=@lss/server\" \"npm run dev:https --workspace=@lss/web\""
   },
   "devDependencies": {
     "concurrently": "^9.2.5",
@@ -20,8 +21,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "dependencies": {
-    "qrcode": "^1.5.4"
   }
 }

@@ -31,7 +31,7 @@ export function createGameServer(simulationFactory?: SimulationFactory): GameSer
   );
   const roomManager = new RoomManager(
     io,
-    simulationFactory ?? ((room) => createWorldSimulation(room, io)),
+    simulationFactory ?? ((room) => createWorldSimulation(room)),
   );
 
   app.get('/health', (_req, res) => {
@@ -43,7 +43,12 @@ export function createGameServer(simulationFactory?: SimulationFactory): GameSer
     });
   });
 
+  // LAN addresses help the host screen build a QR code phones can reach in dev.
   app.get('/api/network', (_req, res) => {
+    if (env.nodeEnv === 'production') {
+      res.json({ ips: [] });
+      return;
+    }
     const interfaces = os.networkInterfaces();
     const ips: Array<{ name: string; ip: string }> = [];
     for (const name of Object.keys(interfaces)) {
