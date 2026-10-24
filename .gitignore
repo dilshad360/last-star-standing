@@ -9,3 +9,4 @@ dist-test/
 .DS_Store
 coverage/
 .vite/
+*.tsbuildinfo

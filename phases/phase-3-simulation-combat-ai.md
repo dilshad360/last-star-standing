@@ -1,6 +1,6 @@
 # Phase 3: Server Simulation, Combat, Safe Zone, AI Bots & Cosmic Director (`apps/server`)
 
-**Status:** Pending  
+**Status:** Completed  
 **Command to execute:** `/run-phase 3`  
 **Owner Agent:** `netcode-architect`
 
@@ -44,9 +44,9 @@ npm test --workspace=@lss/server
 ```
 
 ### Phase 3 Exit Criteria (Definition of Done)
-- [ ] Projectiles damage ships and asteroids accurately; eliminated ships cannot move or shoot.
-- [ ] Destroying asteroids spawns pickups (`SHIELD`, `RAPID_FIRE`, `REPAIR`, `ENERGY`) that apply buffs on collection.
-- [ ] Safe zone shrinks on schedule and damages ships outside the safe radius.
-- [ ] AI Bot Pilots actively move toward the safe zone and fight until one winner remains.
-- [ ] AI Cosmic Director triggers cosmic events cleanly during active matches.
-- [ ] Full headless match completes deterministically and outputs a valid `MatchResult` scoreboard.
+- [x] Projectiles damage ships and asteroids accurately; eliminated ships cannot move or shoot.
+- [x] Destroying asteroids spawns pickups (`SHIELD`, `RAPID_FIRE`, `REPAIR`, `ENERGY`) that apply buffs on collection.
+- [x] Safe zone shrinks on schedule and damages ships outside the safe radius.
+- [x] AI Bot Pilots actively move toward the safe zone and fight until one winner remains.
+- [x] AI Cosmic Director triggers cosmic events cleanly during active matches.
+- [x] Full headless match completes deterministically and outputs a valid `MatchResult` scoreboard.

@@ -1,6 +1,6 @@
 # Phase 4: Phaser 3 Procedural Neon Arena, Audio Synth & Input (`apps/web`)
 
-**Status:** Pending  
+**Status:** Completed  
 **Command to execute:** `/run-phase 4`  
 **Owner Agent:** `phaser-renderer`
 
@@ -38,7 +38,7 @@ npm run dev
 ```
 
 ### Phase 4 Exit Criteria (Definition of Done)
-- [ ] Browser opens the Phaser 3 neon space arena at 60 fps with zero console errors.
-- [ ] Ship moves smoothly with `WASD`/Arrows, rotates toward the mouse cursor, and fires glowing projectiles on Left-Click / `Space`.
-- [ ] Web Audio synth plays laser, hit, explosion, and pickup sounds (`M` toggles mute).
-- [ ] Asteroids, pickups, AI bots, and the shrinking safe-zone plasma ring render clearly and interpolate smoothly.
+- [x] Browser opens the Phaser 3 neon space arena at 60 fps with zero console errors.
+- [x] Ship moves smoothly with `WASD`/Arrows, rotates toward the mouse cursor, and fires glowing projectiles on Left-Click / `Space`.
+- [x] Web Audio synth plays laser, hit, explosion, and pickup sounds (`M` toggles mute).
+- [x] Asteroids, pickups, AI bots, and the shrinking safe-zone plasma ring render clearly and interpolate smoothly.
