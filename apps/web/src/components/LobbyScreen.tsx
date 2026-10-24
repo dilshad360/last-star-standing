@@ -26,7 +26,6 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   countdown,
 }) => {
   const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
 
   const localPlayer = room.players.find((p) => p.id === localPlayerId);
@@ -108,14 +107,6 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     }
   };
 
-  const copyCode = async () => {
-    const ok = await copyToClipboard(room.code);
-    if (ok) {
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
-    }
-  };
-
   // Animate 3-2-1 countdown
   useEffect(() => {
     if (!countdown) {
@@ -186,28 +177,16 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 2, fontWeight: 'bold' }}>
               GAME ROOM
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-              <span
-                onClick={copyCode}
-                className="title-glow"
-                style={{
-                  fontSize: 32,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  letterSpacing: 6,
-                }}
-                title="Click to copy room code"
-              >
-                {room.code}
-              </span>
-              <button
-                onClick={copyCode}
-                className="btn-neon-outline"
-                style={{ padding: '4px 10px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}
-              >
-                {copiedCode ? <CheckIcon size={12} color="#22c55e" /> : <CopyIcon size={12} />}
-                {copiedCode ? 'Copied' : 'Copy Code'}
-              </button>
+            <div
+              className="title-glow"
+              style={{
+                fontSize: 32,
+                fontWeight: 900,
+                letterSpacing: 6,
+                marginTop: 2,
+              }}
+            >
+              {room.code}
             </div>
           </div>
 
@@ -386,37 +365,18 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 />
               </div>
 
-              {/* Direct clickable URL with auto-copy */}
+              {/* Direct share URL text */}
               <div
-                onClick={copyLink}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
+                  fontSize: 11,
+                  color: '#38bdf8',
                   marginTop: 12,
-                  background: copiedLink ? 'rgba(34, 197, 94, 0.2)' : 'rgba(56, 189, 248, 0.12)',
-                  padding: '6px 12px',
-                  borderRadius: 4,
-                  border: `1px solid ${copiedLink ? 'rgba(34, 197, 94, 0.5)' : 'rgba(56, 189, 248, 0.3)'}`,
-                  maxWidth: '100%',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  letterSpacing: 0.5,
+                  wordBreak: 'break-all',
+                  maxWidth: 240,
                 }}
-                title="Click to copy invite link"
               >
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: copiedLink ? '#22c55e' : '#38bdf8',
-                    fontWeight: 700,
-                    letterSpacing: 0.5,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {copiedLink ? '✓ Link Copied to Clipboard!' : shareUrl}
-                </span>
+                {shareUrl}
               </div>
 
               {/* Network interface selector if multiple are available on host */}
@@ -444,10 +404,6 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   </select>
                 </div>
               )}
-
-              <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-                Or enter room code: <strong style={{ color: '#f8fafc', letterSpacing: 2 }}>{room.code}</strong>
-              </div>
             </div>
 
             {/* Host Controls: AI Bot Count Slider */}

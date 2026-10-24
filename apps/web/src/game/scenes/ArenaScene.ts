@@ -13,8 +13,11 @@ import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   EMP_RADIUS,
+  FIRE_COOLDOWN_MS,
   NEON,
   PICKUP_COLORS,
+  PICKUP_RADIUS,
+  RAPID_FIRE_COOLDOWN_MS,
   SHIP_COLORS,
   SHIP_MAX_SPEED,
   SHIP_RADIUS,
@@ -115,6 +118,8 @@ export class ArenaScene extends Phaser.Scene {
   private planetContainer!: Phaser.GameObjects.Container;
   private latestSnapshot: GameSnapshot | null = null;
   private spectatorIndex = 0;
+  private syncedInitialHeading = false;
+  private lastLaserSoundAt = 0;
   private unsubscribeSnapshot: (() => void) | null = null;
   private unsubscribeEliminated: (() => void) | null = null;
   private explosionEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -127,6 +132,8 @@ export class ArenaScene extends Phaser.Scene {
     if (data?.localPlayerId) {
       this.localPlayerId = data.localPlayerId;
     }
+    this.syncedInitialHeading = false;
+    this.lastLaserSoundAt = 0;
     this.inputManager = new InputManager();
   }
 
@@ -225,9 +232,18 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   setLocalPlayerId(id: string | null): void {
+    if (this.localPlayerId !== id) {
+      this.syncedInitialHeading = false;
+    }
     this.localPlayerId = id;
     if (id && this.ships.has(id)) {
       const ship = this.ships.get(id)!;
+      if (!this.syncedInitialHeading) {
+        this.inputManager.setFacingAngle(ship.targetRotation);
+        ship.rotation = ship.targetRotation;
+        ship.shipVisualContainer.setRotation(ship.rotation);
+        this.syncedInitialHeading = true;
+      }
       this.cameras.main.centerOn(ship.x, ship.y);
     }
   }
@@ -296,17 +312,25 @@ export class ArenaScene extends Phaser.Scene {
       ship.targetY = player.y;
       ship.targetRotation = player.rotation;
       ship.lastUpdate = now;
+      if (player.id === this.localPlayerId && !this.syncedInitialHeading) {
+        this.inputManager.setFacingAngle(player.rotation);
+        ship.rotation = player.rotation;
+        ship.shipVisualContainer.setRotation(player.rotation);
+        this.syncedInitialHeading = true;
+      }
       this.updateShipVisuals(ship, player);
     }
 
-    // Snap camera to local ship as soon as it appears
+    // Snap camera to local ship as soon as it appears (only while alive)
     if (this.localPlayerId && this.ships.has(this.localPlayerId)) {
       const myShip = this.ships.get(this.localPlayerId)!;
-      const cam = this.cameras.main;
-      const camX = cam.scrollX + cam.width / 2;
-      const camY = cam.scrollY + cam.height / 2;
-      if (Math.hypot(camX - myShip.x, camY - myShip.y) > 900) {
-        cam.centerOn(myShip.x, myShip.y);
+      if (myShip.alive) {
+        const cam = this.cameras.main;
+        const camX = cam.scrollX + cam.width / 2;
+        const camY = cam.scrollY + cam.height / 2;
+        if (Math.hypot(camX - myShip.x, camY - myShip.y) > 900) {
+          cam.centerOn(myShip.x, myShip.y);
+        }
       }
     }
 
@@ -376,6 +400,16 @@ export class ArenaScene extends Phaser.Scene {
       if (!seenPickups.has(id)) {
         if (pickup.type === 'EMP_BLAST') {
           this.createEmpShockwave(pickup.x, pickup.y);
+        } else if (this.localPlayerId) {
+          const localShip = this.ships.get(this.localPlayerId);
+          if (
+            localShip &&
+            localShip.alive &&
+            Math.hypot(localShip.x - pickup.x, localShip.y - pickup.y) <=
+              SHIP_RADIUS + PICKUP_RADIUS + 40
+          ) {
+            soundManager.playPickup();
+          }
         }
         pickup.graphics.destroy();
         this.pickups.delete(id);
@@ -1131,12 +1165,16 @@ export class ArenaScene extends Phaser.Scene {
     const color = zone.isShrinking ? NEON.storm : NEON.safeZone;
     this.safeZoneGraphics.lineStyle(6, Phaser.Display.Color.HexStringToColor(color).color, 0.8);
     this.safeZoneGraphics.strokeCircle(zone.centerX, zone.centerY, zone.radius);
-    // Danger overlay outside zone
-    if (zone.radius < 2000) {
-      this.safeZoneGraphics.fillStyle(0xf43f5e, 0.05);
-      this.safeZoneGraphics.fillCircle(zone.centerX, zone.centerY, 2000);
-      this.safeZoneGraphics.fillStyle(0x000000, 0);
-      this.safeZoneGraphics.fillCircle(zone.centerX, zone.centerY, zone.radius);
+    // Danger overlay outside the safe zone using an outer ring stroke
+    const maxArenaRadius = Math.hypot(ARENA_WIDTH, ARENA_HEIGHT);
+    if (zone.radius < maxArenaRadius) {
+      const stormThickness = maxArenaRadius - zone.radius;
+      this.safeZoneGraphics.lineStyle(stormThickness, 0xf43f5e, 0.07);
+      this.safeZoneGraphics.strokeCircle(
+        zone.centerX,
+        zone.centerY,
+        zone.radius + stormThickness / 2,
+      );
     }
   }
 
@@ -1259,7 +1297,9 @@ export class ArenaScene extends Phaser.Scene {
   // ── Camera & input ─────────────────────────────────────────────────────────
 
   private updateCamera(): void {
-    const targetId = this.localPlayerId ?? this.getSpectatorTarget();
+    const localShip = this.localPlayerId ? this.ships.get(this.localPlayerId) : null;
+    const targetId =
+      localShip && localShip.alive ? this.localPlayerId : this.getSpectatorTarget();
     const ship = targetId ? this.ships.get(targetId) : null;
     if (ship) {
       this.cameras.main.centerOn(ship.x, ship.y);
@@ -1298,8 +1338,21 @@ export class ArenaScene extends Phaser.Scene {
   private handleLocalInput(input: PlayerInput): void {
     input.aimAngle = this.inputManager.getFacingAngle();
     socketClient.sendInput(input);
-    if (input.shooting) {
-      soundManager.playLaser();
+    if (input.shooting && this.localPlayerId) {
+      const localPlayer = this.latestSnapshot?.players.find(
+        (p) => p.id === this.localPlayerId,
+      );
+      if (localPlayer?.alive) {
+        const now = performance.now();
+        const hasRapidFire =
+          localPlayer.upgrades.RAPID_FIRE !== undefined &&
+          localPlayer.upgrades.RAPID_FIRE > Date.now();
+        const cooldown = hasRapidFire ? RAPID_FIRE_COOLDOWN_MS : FIRE_COOLDOWN_MS;
+        if (now - this.lastLaserSoundAt >= cooldown) {
+          this.lastLaserSoundAt = now;
+          soundManager.playLaser();
+        }
+      }
     }
   }
 

@@ -101,6 +101,14 @@ export class InputManager {
     return this.facingAngle;
   }
 
+  /** Synchronize facing angle with server spawn rotation. */
+  setFacingAngle(angle: number): void {
+    if (!Number.isFinite(angle)) return;
+    this.facingAngle = angle;
+    while (this.facingAngle > Math.PI) this.facingAngle -= Math.PI * 2;
+    while (this.facingAngle < -Math.PI) this.facingAngle += Math.PI * 2;
+  }
+
   /** Check if Afterburner Boost is active (Shift key or mobile boost button held). */
   isBoosting(): boolean {
     return this.keys.has('shift') || this.touchBoost;
