@@ -96,6 +96,9 @@ export default function App() {
 
     const offRoom = gameEvents.on('room:updated', (updatedRoom) => {
       setRoom(updatedRoom);
+      if (updatedRoom.code && window.location.search !== `?room=${updatedRoom.code}`) {
+        window.history.replaceState(null, '', `?room=${updatedRoom.code}`);
+      }
       if (updatedRoom.status === 'LOBBY' && screen !== 'lobby' && screen !== 'landing') {
         setScreen('lobby');
         setCountdown(null);
@@ -215,6 +218,7 @@ export default function App() {
       }
       playerIdRef.current = ack.playerId;
       setRoom(ack.room);
+      window.history.replaceState(null, '', `?room=${ack.room.code}`);
       setScreen('lobby');
     } catch (err) {
       setErrorToast(err instanceof Error ? err.message : String(err));
@@ -240,6 +244,7 @@ export default function App() {
       }
       playerIdRef.current = ack.playerId;
       setRoom(ack.room);
+      window.history.replaceState(null, '', `?room=${ack.room.code}`);
       setScreen(ack.room.status === 'ACTIVE' ? 'playing' : 'lobby');
     } catch (err) {
       setErrorToast(err instanceof Error ? err.message : String(err));
@@ -280,6 +285,7 @@ export default function App() {
       // Ignore
     }
     setRoom(null);
+    window.history.replaceState(null, '', window.location.pathname);
     setScreen('landing');
   };
 
@@ -303,6 +309,7 @@ export default function App() {
     setResult(null);
     setEliminatedInfo(null);
     setSnapshot(null);
+    window.history.replaceState(null, '', window.location.pathname);
     setScreen('landing');
     void socketClient.leaveRoom();
     mountedRef.current = false;

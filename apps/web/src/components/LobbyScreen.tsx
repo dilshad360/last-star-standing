@@ -61,23 +61,58 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   const networkOrigin = `${window.location.protocol}//${selectedHost}${networkPort}`;
   const shareUrl = `${networkOrigin}/?room=${room.code}`;
 
-  const copyLink = async () => {
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    // 1. Try modern Clipboard API if supported and in secure context
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fall through to fallback
+      }
+    }
+
+    // 2. Reliable cross-browser fallback for HTTP LAN IPs and mobile browsers
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.width = '2em';
+      textArea.style.height = '2em';
+      textArea.style.padding = '0';
+      textArea.style.border = 'none';
+      textArea.style.outline = 'none';
+      textArea.style.boxShadow = 'none';
+      textArea.style.background = 'transparent';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      textArea.setSelectionRange(0, 99999);
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return successful;
+    } catch (err) {
+      console.error('Copy fallback failed:', err);
+      return false;
+    }
+  };
+
+  const copyLink = async () => {
+    const ok = await copyToClipboard(shareUrl);
+    if (ok) {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
-    } catch {
-      // Fallback
     }
   };
 
   const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(room.code);
+    const ok = await copyToClipboard(room.code);
+    if (ok) {
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2000);
-    } catch {
-      // Fallback
     }
   };
 
@@ -353,36 +388,35 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
               {/* Direct clickable URL with auto-copy */}
               <div
+                onClick={copyLink}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
                   marginTop: 12,
-                  background: 'rgba(56, 189, 248, 0.12)',
-                  padding: '5px 12px',
+                  background: copiedLink ? 'rgba(34, 197, 94, 0.2)' : 'rgba(56, 189, 248, 0.12)',
+                  padding: '6px 12px',
                   borderRadius: 4,
-                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  border: `1px solid ${copiedLink ? 'rgba(34, 197, 94, 0.5)' : 'rgba(56, 189, 248, 0.3)'}`,
                   maxWidth: '100%',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
                 }}
+                title="Click to copy invite link"
               >
-                <a
-                  href={shareUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <span
                   style={{
                     fontSize: 12,
-                    color: '#38bdf8',
+                    color: copiedLink ? '#22c55e' : '#38bdf8',
                     fontWeight: 700,
-                    textDecoration: 'none',
                     letterSpacing: 0.5,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}
-                  title="Click to open or copy"
                 >
-                  {shareUrl}
-                </a>
+                  {copiedLink ? '✓ Link Copied to Clipboard!' : shareUrl}
+                </span>
               </div>
 
               {/* Network interface selector if multiple are available on host */}
