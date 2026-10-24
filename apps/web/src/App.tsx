@@ -96,7 +96,7 @@ export default function App() {
 
     const offRoom = gameEvents.on('room:updated', (updatedRoom) => {
       setRoom(updatedRoom);
-      if (updatedRoom.code && window.location.search !== `?room=${updatedRoom.code}`) {
+      if (updatedRoom.isCustom && updatedRoom.code && window.location.search !== `?room=${updatedRoom.code}`) {
         window.history.replaceState(null, '', `?room=${updatedRoom.code}`);
       }
       if (updatedRoom.status === 'LOBBY' && screen !== 'lobby' && screen !== 'landing') {

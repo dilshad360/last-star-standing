@@ -310,6 +310,33 @@ describe('quick play', () => {
     expect(snapshot.players).toHaveLength(5);
     socket.disconnect();
   }, 10_000);
+
+  it('does not match quick play into existing custom rooms', async () => {
+    const host = await connect();
+    const hostAck = await createRoom(host);
+    expect(hostAck.ok).toBe(true);
+    if (!hostAck.ok) throw new Error('create failed');
+    expect(hostAck.room.isCustom).toBe(true);
+
+    const quickSocket = await connect();
+    const quickAck = await emitAck<JoinAck>(quickSocket, 'room:quickPlay', {
+      displayName: 'BotPlayer',
+      botCount: 3,
+    });
+    expect(quickAck.ok).toBe(true);
+    if (!quickAck.ok) throw new Error('quickPlay failed');
+
+    // Quick play must NOT join the custom room!
+    expect(quickAck.room.code).not.toBe(hostAck.room.code);
+    expect(quickAck.room.isCustom).toBe(false);
+
+    // Host room must still only contain the host
+    const hostRoom = server.roomManager.getRoom(hostAck.room.code);
+    expect(hostRoom?.humans).toHaveLength(1);
+
+    host.disconnect();
+    quickSocket.disconnect();
+  }, 10_000);
 });
 
 describe('disconnect handling', () => {

@@ -175,7 +175,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
         >
           <div>
             <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 2, fontWeight: 'bold' }}>
-              GAME ROOM
+              {room.isCustom ? 'CUSTOM ROOM' : 'SOLO VS BOTS'}
             </div>
             <div
               className="title-glow"
@@ -186,19 +186,21 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 marginTop: 2,
               }}
             >
-              {room.code}
+              {room.isCustom ? room.code : 'SIMULATION GRID'}
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              onClick={copyLink}
-              className="btn-neon-orange"
-              style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              {copiedLink ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-              {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
-            </button>
+            {room.isCustom && (
+              <button
+                onClick={copyLink}
+                className="btn-neon-orange"
+                style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                {copiedLink ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+                {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
+              </button>
+            )}
             <button
               onClick={onLeaveRoom}
               className="btn-neon-outline"
@@ -332,79 +334,119 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             </div>
           </div>
 
-          {/* Right Column: QR Code & Match Controls */}
+          {/* Right Column: QR Code (for custom rooms) or Bot Mission Briefing (for bot play) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* High-visibility QR Code Card for Mobile / Secondary Players */}
-            <div
-              className="cockpit-panel"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                padding: '18px 16px',
-                textAlign: 'center',
-              }}
-            >
-              <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1.5, marginBottom: 12, fontWeight: 700 }}>
-                SCAN TO JOIN ON MOBILE
-              </div>
-
-              {/* High-contrast solid white frame without colored borders for instantaneous camera recognition */}
+            {room.isCustom ? (
+              /* High-visibility QR Code Card for Mobile / Secondary Players */
               <div
+                className="cockpit-panel"
                 style={{
-                  padding: 10,
-                  background: '#ffffff',
-                  borderRadius: 10,
-                  boxShadow: '0 0 24px rgba(34, 211, 238, 0.45), 0 8px 24px rgba(0, 0, 0, 0.7)',
-                  display: 'inline-block',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  padding: '18px 16px',
+                  textAlign: 'center',
                 }}
               >
-                <QrCodeSvg
-                  value={shareUrl}
-                  size={typeof window !== 'undefined' && window.innerWidth < 480 ? 150 : 190}
-                />
-              </div>
-
-              {/* Direct share URL text */}
-              <div
-                style={{
-                  fontSize: 11,
-                  color: '#38bdf8',
-                  marginTop: 12,
-                  letterSpacing: 0.5,
-                  wordBreak: 'break-all',
-                  maxWidth: 240,
-                }}
-              >
-                {shareUrl}
-              </div>
-
-              {/* Network interface selector if multiple are available on host */}
-              {availableIps.length > 1 && isLocalhost && (
-                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
-                  <span>Host IP:</span>
-                  <select
-                    value={selectedHost}
-                    onChange={(e) => setSelectedHost(e.target.value)}
-                    style={{
-                      background: '#09122c',
-                      color: '#f8fafc',
-                      border: '1px solid rgba(255, 255, 255, 0.25)',
-                      borderRadius: 4,
-                      padding: '2px 8px',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {availableIps.map((ip) => (
-                      <option key={ip} value={ip}>
-                        {ip} {ip.startsWith('10.') ? '(Wi-Fi)' : ip.startsWith('192.168.137') ? '(Hotspot)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1.5, marginBottom: 12, fontWeight: 700 }}>
+                  SCAN TO JOIN ON MOBILE
                 </div>
-              )}
-            </div>
+
+                {/* High-contrast solid white frame without colored borders for instantaneous camera recognition */}
+                <div
+                  style={{
+                    padding: 10,
+                    background: '#ffffff',
+                    borderRadius: 10,
+                    boxShadow: '0 0 24px rgba(34, 211, 238, 0.45), 0 8px 24px rgba(0, 0, 0, 0.7)',
+                    display: 'inline-block',
+                  }}
+                >
+                  <QrCodeSvg
+                    value={shareUrl}
+                    size={typeof window !== 'undefined' && window.innerWidth < 480 ? 150 : 190}
+                  />
+                </div>
+
+                {/* Direct share URL text */}
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: '#38bdf8',
+                    marginTop: 12,
+                    letterSpacing: 0.5,
+                    wordBreak: 'break-all',
+                    maxWidth: 240,
+                  }}
+                >
+                  {shareUrl}
+                </div>
+
+                {/* Network interface selector if multiple are available on host */}
+                {availableIps.length > 1 && isLocalhost && (
+                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
+                    <span>Host IP:</span>
+                    <select
+                      value={selectedHost}
+                      onChange={(e) => setSelectedHost(e.target.value)}
+                      style={{
+                        background: '#09122c',
+                        color: '#f8fafc',
+                        border: '1px solid rgba(255, 255, 255, 0.25)',
+                        borderRadius: 4,
+                        padding: '2px 8px',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {availableIps.map((ip) => (
+                        <option key={ip} value={ip}>
+                          {ip} {ip.startsWith('10.') ? '(Wi-Fi)' : ip.startsWith('192.168.137') ? '(Hotspot)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Bot Mission Briefing Panel */
+              <div
+                className="cockpit-panel"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '28px 20px',
+                  textAlign: 'center',
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 2, fontWeight: 700 }}>
+                  TACTICAL MISSION BRIEFING
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: '#38bdf8' }}>
+                  ORBITAL AI ADVERSARIES
+                </div>
+                <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.6, maxWidth: 300 }}>
+                  Engaging {room.botCount} simulated combat pilots. Out-maneuver enemy trajectories, grab power-ups, and stay inside the shrinking safe zone.
+                </div>
+                <div
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 4,
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    color: '#22c55e',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    marginTop: 6,
+                  }}
+                >
+                  {countdownSeconds !== null ? `LAUNCH IN ${countdownSeconds}s…` : 'SIMULATION PRIMED'}
+                </div>
+              </div>
+            )}
 
             {/* Host Controls: AI Bot Count Slider */}
             {isHost && (

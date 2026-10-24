@@ -73,6 +73,7 @@ export class GameRoom {
   status: MatchStatus = 'LOBBY';
   hostPlayerId = '';
   matchStartedAt: number | null = null;
+  isCustom = false;
 
   private readonly players = new Map<string, RoomPlayer>();
   private botSeq = 0;
@@ -132,6 +133,7 @@ export class GameRoom {
       botCount: this.bots.length,
       maxPlayers: MAX_PLAYERS_PER_ROOM,
       createdAt: this.createdAt,
+      isCustom: this.isCustom,
     };
   }
 

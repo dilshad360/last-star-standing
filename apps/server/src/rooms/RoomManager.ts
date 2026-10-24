@@ -32,7 +32,7 @@ export class RoomManager {
     throw new Error('Unable to allocate a unique room code.');
   }
 
-  createRoom(): GameRoom {
+  createRoom(options?: { isCustom?: boolean }): GameRoom {
     const code = this.generateRoomCode();
     const room = new GameRoom(
       code,
@@ -40,6 +40,9 @@ export class RoomManager {
       (empty) => this.rooms.delete(empty.code),
       this.simulationFactory,
     );
+    if (options?.isCustom) {
+      room.isCustom = true;
+    }
     this.rooms.set(code, room);
     return room;
   }
@@ -48,10 +51,10 @@ export class RoomManager {
     return this.rooms.get(code);
   }
 
-  /** Finds a LOBBY room with an open human slot for Quick Play matchmaking. */
+  /** Finds a non-custom LOBBY room with an open human slot for Quick Play matchmaking. */
   findQuickPlayRoom(): GameRoom | undefined {
     for (const room of this.rooms.values()) {
-      if (room.status === 'LOBBY' && room.humans.length < MAX_PLAYERS_PER_ROOM) {
+      if (!room.isCustom && room.status === 'LOBBY' && room.humans.length < MAX_PLAYERS_PER_ROOM) {
         return room;
       }
     }

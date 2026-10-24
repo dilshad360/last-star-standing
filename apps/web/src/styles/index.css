@@ -464,6 +464,178 @@ body, html {
   animation: spin 0.85s linear infinite;
 }
 
+/* ── Start Menu / Landing Screen Cosmic Decorations ────────────────────── */
+@keyframes floatShip {
+  0%, 100% {
+    transform: translateY(0px) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1deg);
+  }
+}
+
+@keyframes flameFlicker {
+  0%, 100% {
+    transform: scaleY(1) scaleX(1);
+    opacity: 0.92;
+  }
+  50% {
+    transform: scaleY(1.22) scaleX(0.9);
+    opacity: 1;
+  }
+}
+
+@keyframes starTwinkle {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes meteorStreak {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-35deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.9;
+  }
+  30% {
+    transform: translate3d(-420px, 290px, 0) rotate(-35deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(-420px, 290px, 0) rotate(-35deg);
+    opacity: 0;
+  }
+}
+
+@keyframes gridDrift {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 0 48px, 48px 0;
+  }
+}
+
+@keyframes scanlinePass {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(400%);
+  }
+}
+
+.landing-grid-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to bottom, rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+    linear-gradient(to right, rgba(34, 211, 238, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.75) 15%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.75) 15%, transparent 78%);
+  animation: gridDrift 6s linear infinite;
+  z-index: 1;
+}
+
+.landing-nebula-cyan {
+  position: absolute;
+  width: 560px;
+  height: 560px;
+  top: -140px;
+  left: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.14) 0%, rgba(34, 211, 238, 0.04) 45%, transparent 70%);
+  filter: blur(28px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.landing-nebula-orange {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  bottom: -160px;
+  right: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.14) 0%, rgba(244, 63, 94, 0.05) 45%, transparent 70%);
+  filter: blur(28px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.landing-ship-emblem {
+  animation: floatShip 3.8s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.55));
+}
+
+.landing-thruster-flame {
+  transform-origin: center top;
+  animation: flameFlicker 0.18s ease-in-out infinite;
+}
+
+.landing-orbital-ring {
+  transform-origin: center center;
+  animation: spin 24s linear infinite;
+}
+
+.landing-orbital-ring-reverse {
+  transform-origin: center center;
+  animation: spin 16s linear infinite reverse;
+}
+
+.landing-scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.landing-scanline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(34, 211, 238, 0.05) 50%,
+    rgba(34, 211, 238, 0.12) 98%,
+    transparent 100%
+  );
+  animation: scanlinePass 7.5s linear infinite;
+}
+
+.landing-input:focus {
+  border-color: var(--neon-cyan) !important;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.35), inset 0 2px 6px rgba(0, 0, 0, 0.7) !important;
+}
+
+.keycap-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-bottom: 2px solid rgba(34, 211, 238, 0.7);
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
 /* ── Mobile Touch Controls & Responsiveness ────────────────────────────── */
 .touch-control {
   user-select: none;
@@ -490,6 +662,10 @@ body, html {
   }
 
   .hud-killfeed {
+    display: none !important;
+  }
+
+  .landing-telemetry-badge {
     display: none !important;
   }
 }

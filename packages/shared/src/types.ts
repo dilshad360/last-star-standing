@@ -196,4 +196,6 @@ export interface RoomInfo {
   botCount: number;
   maxPlayers: number;
   createdAt: number;
+  isCustom?: boolean;
 }
+

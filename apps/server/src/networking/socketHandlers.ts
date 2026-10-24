@@ -147,7 +147,7 @@ export function registerSocketHandlers(
       return fail(ack, 'INVALID_NAME', `Display name must be ${MIN_DISPLAY_NAME_LENGTH}-${MAX_DISPLAY_NAME_LENGTH} characters.`);
     }
     leaveCurrentRoom();
-    const room = roomManager.createRoom();
+    const room = roomManager.createRoom({ isCustom: true });
     const joined = joinRoom(socket, room, name);
     if (!joined.ok) {
       roomManager.removeRoom(room.code);
@@ -196,9 +196,13 @@ export function registerSocketHandlers(
     }
     leaveCurrentRoom();
 
-    let room = roomManager.findQuickPlayRoom();
+    // If the player specifically selected "Play vs Bots" with botCount, create a dedicated
+    // bot play room with their desired bot count so launch is instant and unconflicted.
+    // Otherwise, match into an open non-custom quick-play lobby or create a new one.
+    const isBotMatch = isFiniteNumber(payload?.botCount);
+    let room = isBotMatch ? undefined : roomManager.findQuickPlayRoom();
     const created = !room;
-    room ??= roomManager.createRoom();
+    room ??= roomManager.createRoom({ isCustom: false });
 
     const joined = joinRoom(socket, room, name);
     if (!joined.ok) {
