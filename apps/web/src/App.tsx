@@ -1,186 +1,388 @@
 import { useEffect, useRef, useState } from 'react';
-import type { GameSnapshot, MatchResult } from '@lss/shared';
+import type {
+  GameSnapshot,
+  KillFeedEntry,
+  MatchResult,
+  PlayerState,
+  RoomInfo,
+} from '@lss/shared';
 import { phaserGame } from './game/PhaserGame.js';
 import { socketClient } from './networking/SocketClient.js';
 import { gameEvents } from './game/EventBus.js';
 import { soundManager } from './game/audio/SoundManager.js';
 
-type Phase = 'landing' | 'playing' | 'finished';
+import { LandingScreen } from './components/LandingScreen.js';
+import { LobbyScreen } from './components/LobbyScreen.js';
+import { HudOverlay } from './components/HudOverlay.js';
+import { EliminatedOverlay } from './components/EliminatedOverlay.js';
+import { WinnerScreen } from './components/WinnerScreen.js';
+import { ConnectionBanner } from './components/ConnectionBanner.js';
 
-/**
- * Minimal playable test harness for Phase 4.
- * The full React UI (lobby, HUD, winner screen) arrives in Phase 5.
- */
+import './styles/index.css';
+
+type ScreenState = 'landing' | 'lobby' | 'playing' | 'finished';
+
+interface EliminatedInfo {
+  placement: number;
+  totalPlayers: number;
+  killerName: string | null;
+  cause?: string;
+}
+
 export default function App() {
-  const [phase, setPhase] = useState<Phase>('landing');
-  const [displayName, setDisplayName] = useState('');
-  const [status, setStatus] = useState('');
-  const [hud, setHud] = useState<{ health: number; alive: number; kills: number } | null>(null);
-  const [result, setResult] = useState<MatchResult | null>(null);
+  const [screen, setScreen] = useState<ScreenState>('landing');
+  const [displayName, setDisplayName] = useState(() => {
+    return (
+      localStorage.getItem('lss_pilot_name') ||
+      `Pilot-${Math.floor(100 + Math.random() * 900)}`
+    );
+  });
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [muted, setMuted] = useState(false);
+
+  // Connection
+  const [connected, setConnected] = useState(true);
+  const [latencyMs, setLatencyMs] = useState<number | undefined>(undefined);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  // Match & Room state
+  const [room, setRoom] = useState<RoomInfo | null>(null);
+  const [countdown, setCountdown] = useState<{ startsAt: number; durationMs: number } | null>(null);
+  const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
+  const [result, setResult] = useState<MatchResult | null>(null);
+  const [eliminatedInfo, setEliminatedInfo] = useState<EliminatedInfo | null>(null);
+  const [spectatorTargetName, setSpectatorTargetName] = useState<string | null>(null);
+
   const playerIdRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(false);
+  const lastSnapshotTimeRef = useRef(0);
 
+  // Save display name when updated
+  const handleDisplayNameChange = (name: string) => {
+    setDisplayName(name);
+    localStorage.setItem('lss_pilot_name', name);
+  };
+
+  // Check URL query parameters for initial ?room=CODE
+  const initialRoomCode = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('room') || '';
+  })();
+
+  // ── Global EventBus Subscriptions ──────────────────────────────────────────
   useEffect(() => {
-    const offFinished = gameEvents.on('match:finished', (r) => {
-      setResult(r);
-      setPhase('finished');
+    const offConn = gameEvents.on('connection:status', (status) => {
+      setConnected(status.connected);
+      if (status.latencyMs !== undefined) setLatencyMs(status.latencyMs);
+    });
+
+    const offError = gameEvents.on('error', (err) => {
+      setErrorToast(err.message);
+      setLoading(false);
+    });
+
+    const offRoom = gameEvents.on('room:updated', (updatedRoom) => {
+      setRoom(updatedRoom);
+      if (updatedRoom.status === 'LOBBY' && screen !== 'lobby' && screen !== 'landing') {
+        setScreen('lobby');
+        setCountdown(null);
+        setResult(null);
+        setEliminatedInfo(null);
+      }
+    });
+
+    const offCountdown = gameEvents.on('match:countdown', (cd) => {
+      setCountdown(cd);
+    });
+
+    const offMatchStarted = gameEvents.on('match:started', (payload) => {
+      setCountdown(null);
+      setSnapshot(payload.snapshot);
+      setEliminatedInfo(null);
+      setScreen('playing');
+    });
+
+    // Throttled snapshot state update (~10 Hz) for React HUD overlay
+    const offSnapshot = gameEvents.on('snapshot:update', (snap) => {
+      const now = Date.now();
+      if (now - lastSnapshotTimeRef.current >= 100) {
+        lastSnapshotTimeRef.current = now;
+        setSnapshot(snap);
+
+        // Update current spectator target if spectating
+        if (mountedRef.current && phaserGame.scene) {
+          setSpectatorTargetName(phaserGame.scene.getCurrentSpectatorTargetName());
+        }
+      }
+    });
+
+    const offEliminated = gameEvents.on('player:eliminated', (entry: KillFeedEntry) => {
+      if (entry.victimId === playerIdRef.current) {
+        const total = snapshot?.players.length ?? 8;
+        const alive = (snapshot?.aliveCount ?? 1);
+        setEliminatedInfo({
+          placement: alive,
+          totalPlayers: total,
+          killerName: entry.killerName,
+          cause: entry.cause ? `Eliminated by ${entry.cause.toLowerCase()}` : undefined,
+        });
+      }
+    });
+
+    const offFinished = gameEvents.on('match:finished', (res) => {
+      setResult(res);
+      setScreen('finished');
       soundManager.playVictory();
     });
-    const offSnapshot = gameEvents.on('snapshot:update', (snap: GameSnapshot) => {
-      const me = snap.players.find((p) => p.id === playerIdRef.current);
-      if (me) setHud({ health: me.health, alive: snap.aliveCount, kills: me.kills });
-    });
-    return () => {
-      offFinished();
-      offSnapshot();
-    };
-  }, []);
 
+    return () => {
+      offConn();
+      offError();
+      offRoom();
+      offCountdown();
+      offMatchStarted();
+      offSnapshot();
+      offEliminated();
+      offFinished();
+    };
+  }, [screen, snapshot]);
+
+  // ── Mount / Unmount Phaser Game Canvas ─────────────────────────────────────
   useEffect(() => {
-    if (phase === 'playing' && canvasRef.current && !mountedRef.current) {
+    if (screen === 'playing' && canvasRef.current && !mountedRef.current) {
       mountedRef.current = true;
       phaserGame.mount(canvasRef.current, playerIdRef.current ?? undefined);
     }
-    if (phase !== 'playing' && mountedRef.current) {
+    if (screen !== 'playing' && mountedRef.current) {
       mountedRef.current = false;
       phaserGame.unmount();
     }
-  }, [phase]);
+  }, [screen]);
 
-  const quickPlay = async () => {
-    const name = displayName.trim() || `Pilot-${Math.floor(Math.random() * 1000)}`;
-    setStatus('Connecting…');
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const handleQuickPlay = async (botCount: number) => {
+    const name = displayName.trim() || `Pilot-${Math.floor(100 + Math.random() * 900)}`;
+    setLoading(true);
+    setStatusMessage('Connecting to orbital grid…');
     try {
+      soundManager.init();
+      soundManager.resume();
       await socketClient.connect();
-      const ack = await socketClient.quickPlay(name, 5);
+      const ack = await socketClient.quickPlay(name, botCount);
       if (!ack.ok) {
-        setStatus(`Error: ${ack.error}`);
+        setErrorToast(ack.error);
+        setLoading(false);
         return;
       }
       playerIdRef.current = ack.playerId;
-      setStatus(`Room ${ack.room.code} — match starting…`);
-      setPhase('playing');
+      setRoom(ack.room);
+      setScreen(ack.room.status === 'ACTIVE' ? 'playing' : 'lobby');
     } catch (err) {
-      setStatus(`Connection failed: ${err instanceof Error ? err.message : String(err)}`);
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+      setStatusMessage(null);
     }
   };
 
-  const playAgain = async () => {
+  const handleCreateRoom = async () => {
+    const name = displayName.trim() || `Pilot-${Math.floor(100 + Math.random() * 900)}`;
+    setLoading(true);
+    setStatusMessage('Establishing quantum room…');
+    try {
+      soundManager.init();
+      soundManager.resume();
+      await socketClient.connect();
+      const ack = await socketClient.createRoom(name);
+      if (!ack.ok) {
+        setErrorToast(ack.error);
+        setLoading(false);
+        return;
+      }
+      playerIdRef.current = ack.playerId;
+      setRoom(ack.room);
+      setScreen('lobby');
+    } catch (err) {
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+      setStatusMessage(null);
+    }
+  };
+
+  const handleJoinRoom = async (code: string) => {
+    const name = displayName.trim() || `Pilot-${Math.floor(100 + Math.random() * 900)}`;
+    setLoading(true);
+    setStatusMessage(`Docking with room ${code}…`);
+    try {
+      soundManager.init();
+      soundManager.resume();
+      await socketClient.connect();
+      const ack = await socketClient.joinRoom(code, name);
+      if (!ack.ok) {
+        setErrorToast(ack.error);
+        setLoading(false);
+        return;
+      }
+      playerIdRef.current = ack.playerId;
+      setRoom(ack.room);
+      setScreen(ack.room.status === 'ACTIVE' ? 'playing' : 'lobby');
+    } catch (err) {
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+      setStatusMessage(null);
+    }
+  };
+
+  const handleSetReady = async (ready: boolean) => {
+    try {
+      await socketClient.setReady(ready);
+    } catch (err) {
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSetBotCount = async (count: number) => {
+    try {
+      await socketClient.setBotCount(count);
+    } catch (err) {
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleStartMatch = async () => {
+    try {
+      await socketClient.startMatch();
+    } catch (err) {
+      setErrorToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleLeaveRoom = async () => {
+    try {
+      await socketClient.leaveRoom();
+    } catch {
+      // Ignore
+    }
+    setRoom(null);
+    setScreen('landing');
+  };
+
+  const handlePlayAgain = async () => {
+    if (isHost) {
+      try {
+        await socketClient.restartMatch();
+      } catch (err) {
+        setErrorToast(err instanceof Error ? err.message : String(err));
+      }
+    } else {
+      setResult(null);
+      setScreen('lobby');
+    }
+  };
+
+  const handleReturnToLanding = () => {
     setResult(null);
-    setPhase('landing');
+    setEliminatedInfo(null);
+    setScreen('landing');
     socketClient.disconnect();
     mountedRef.current = false;
     phaserGame.unmount();
   };
 
+  const toggleMute = () => {
+    const next = soundManager.toggleMute();
+    setMuted(next);
+  };
+
+  // Find local player in snapshot
+  const localPlayerState: PlayerState | null =
+    snapshot?.players.find((p) => p.id === playerIdRef.current) ?? null;
+
+  const isHost = room ? room.hostPlayerId === playerIdRef.current : false;
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', fontFamily: 'monospace', color: '#e2e8f0' }}>
-      {phase === 'landing' && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 16,
-          background: 'radial-gradient(ellipse at center, #0a0a1f 0%, #05050f 100%)',
-        }}>
-          <h1 style={{ color: '#22d3ee', textShadow: '0 0 20px #22d3ee', letterSpacing: 4 }}>
-            LAST STAR STANDING
-          </h1>
-          <p style={{ color: '#94a3b8' }}>Phase 4 test harness — fly, shoot, survive.</p>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Display name"
-            maxLength={16}
-            style={{
-              background: '#0f172a', border: '1px solid #22d3ee', color: '#e2e8f0',
-              padding: '10px 16px', fontSize: 16, fontFamily: 'monospace', width: 240,
-              textAlign: 'center', borderRadius: 4, outline: 'none',
-            }}
-          />
-          <button
-            onClick={quickPlay}
-            style={{
-              background: '#22d3ee', border: 'none', color: '#05050f',
-              padding: '12px 32px', fontSize: 16, fontWeight: 'bold',
-              fontFamily: 'monospace', cursor: 'pointer', borderRadius: 4,
-              boxShadow: '0 0 16px #22d3ee66',
-            }}
-          >
-            QUICK PLAY (5 BOTS)
-          </button>
-          <div style={{ fontSize: 12, color: '#64748b', textAlign: 'center', lineHeight: 1.8 }}>
-            WASD / Arrows — thrust &nbsp;·&nbsp; Mouse — aim &nbsp;·&nbsp; LMB / Space — fire<br />
-            M — mute &nbsp;·&nbsp; Mobile: left half joystick, right half fire
-          </div>
-          {status && <div style={{ color: '#fbbf24' }}>{status}</div>}
-        </div>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {/* Toast and Connection Alerts */}
+      <ConnectionBanner
+        connected={connected}
+        error={errorToast}
+        onDismissError={() => setErrorToast(null)}
+      />
+
+      {/* ── Screen: Landing ─────────────────────────────────────────────────── */}
+      {screen === 'landing' && (
+        <LandingScreen
+          displayName={displayName}
+          onDisplayNameChange={handleDisplayNameChange}
+          onQuickPlay={handleQuickPlay}
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          initialRoomCode={initialRoomCode}
+          muted={muted}
+          onToggleMute={toggleMute}
+          loading={loading}
+          statusMessage={statusMessage}
+        />
       )}
 
-      {phase === 'playing' && (
+      {/* ── Screen: Lobby ───────────────────────────────────────────────────── */}
+      {screen === 'lobby' && room && (
+        <LobbyScreen
+          room={room}
+          localPlayerId={playerIdRef.current ?? ''}
+          isHost={isHost}
+          onSetReady={handleSetReady}
+          onSetBotCount={handleSetBotCount}
+          onStartMatch={handleStartMatch}
+          onLeaveRoom={handleLeaveRoom}
+          countdown={countdown}
+        />
+      )}
+
+      {/* ── Screen: Playing (Phaser Canvas + Live HUD + Spectator) ───────────── */}
+      {screen === 'playing' && (
         <>
           <div ref={canvasRef} style={{ width: '100%', height: '100%' }} />
-          {hud && (
-            <div style={{
-              position: 'absolute', top: 12, left: 12, fontSize: 14,
-              textShadow: '0 0 4px #000',
-            }}>
-              <div>HP {Math.ceil(hud.health)} · Kills {hud.kills} · Alive {hud.alive}</div>
-            </div>
+
+          {/* Live HUD Overlay */}
+          <HudOverlay
+            localPlayer={localPlayerState}
+            snapshot={snapshot}
+            latencyMs={latencyMs}
+            muted={muted}
+            onToggleMute={toggleMute}
+          />
+
+          {/* Eliminated Spectator Overlay */}
+          {eliminatedInfo && (
+            <EliminatedOverlay
+              placement={eliminatedInfo.placement}
+              totalPlayers={eliminatedInfo.totalPlayers}
+              killerName={eliminatedInfo.killerName}
+              cause={eliminatedInfo.cause}
+              spectatorTargetName={spectatorTargetName}
+              onSpectateNext={() => phaserGame.scene?.nextSpectatorTarget()}
+              onSpectatePrev={() => phaserGame.scene?.prevSpectatorTarget()}
+              onReturnToLobby={handleLeaveRoom}
+            />
           )}
-          <button
-            onClick={() => setMuted(soundManager.toggleMute())}
-            style={{
-              position: 'absolute', top: 12, right: 12, background: 'transparent',
-              border: '1px solid #22d3ee', color: '#22d3ee', padding: '4px 10px',
-              fontFamily: 'monospace', cursor: 'pointer', borderRadius: 4,
-            }}
-          >
-            {muted ? 'UNMUTE' : 'MUTE'}
-          </button>
         </>
       )}
 
-      {phase === 'finished' && result && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 16,
-          background: 'rgba(5,5,15,0.92)',
-        }}>
-          <h1 style={{ color: '#fde047', textShadow: '0 0 20px #fde047' }}>
-            {result.winnerName ?? 'NO WINNER'} WINS
-          </h1>
-          <table style={{ borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ color: '#94a3b8' }}>
-                <th style={{ padding: '4px 12px', textAlign: 'left' }}>#</th>
-                <th style={{ padding: '4px 12px', textAlign: 'left' }}>Pilot</th>
-                <th style={{ padding: '4px 12px' }}>Kills</th>
-                <th style={{ padding: '4px 12px' }}>Damage</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.stats.map((s) => (
-                <tr key={s.playerId} style={{ color: s.playerId === playerIdRef.current ? '#22d3ee' : '#e2e8f0' }}>
-                  <td style={{ padding: '4px 12px' }}>{s.placement}</td>
-                  <td style={{ padding: '4px 12px' }}>{s.displayName}</td>
-                  <td style={{ padding: '4px 12px', textAlign: 'center' }}>{s.kills}</td>
-                  <td style={{ padding: '4px 12px', textAlign: 'center' }}>{s.damageDealt}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button
-            onClick={playAgain}
-            style={{
-              background: '#22d3ee', border: 'none', color: '#05050f',
-              padding: '12px 32px', fontSize: 16, fontWeight: 'bold',
-              fontFamily: 'monospace', cursor: 'pointer', borderRadius: 4,
-            }}
-          >
-            PLAY AGAIN
-          </button>
-        </div>
+      {/* ── Screen: Winner Scoreboard ────────────────────────────────────────── */}
+      {screen === 'finished' && result && (
+        <WinnerScreen
+          result={result}
+          localPlayerId={playerIdRef.current}
+          isHost={isHost}
+          onPlayAgain={handlePlayAgain}
+          onReturnToLobby={handleReturnToLanding}
+        />
       )}
     </div>
   );

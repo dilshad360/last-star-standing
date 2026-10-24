@@ -6,6 +6,7 @@ import type {
   PlayerState,
   ProjectileState,
   SafeZoneState,
+  PlayerInput,
 } from '@lss/shared';
 import {
   ARENA_HEIGHT,
@@ -13,13 +14,13 @@ import {
   NEON,
   PICKUP_COLORS,
   SHIP_COLORS,
+  SHIP_MAX_SPEED,
   SHIP_RADIUS,
 } from '@lss/shared';
 import { gameEvents } from '../EventBus.js';
 import { socketClient } from '../../networking/SocketClient.js';
 import { soundManager } from '../audio/SoundManager.js';
 import { InputManager } from '../input/InputManager.js';
-import type { PlayerInput } from '@lss/shared';
 
 // ── Interpolation state ──────────────────────────────────────────────────────
 interface InterpolatedShip {
@@ -34,11 +35,22 @@ interface InterpolatedShip {
   prevY: number;
   prevRotation: number;
   lastUpdate: number;
+  color: number;
+  speed: number;
+  alive: boolean;
+  hasShield: boolean;
+  spawnProtectedUntil: number;
+  trailAccumulator: number;
+  flickerOffset: number;
   graphics: Phaser.GameObjects.Container;
-  shield: Phaser.GameObjects.Arc;
+  hullGraphics: Phaser.GameObjects.Graphics;
+  flameGraphics: Phaser.GameObjects.Graphics;
+  shieldGraphics: Phaser.GameObjects.Graphics;
   healthBar: Phaser.GameObjects.Graphics;
   nameText: Phaser.GameObjects.Text;
-  thruster: Phaser.GameObjects.Particles.ParticleEmitter;
+  localIndicator?: Phaser.GameObjects.Graphics;
+  trailEmitter: Phaser.GameObjects.Particles.ParticleEmitter;
+  sparkEmitter: Phaser.GameObjects.Particles.ParticleEmitter;
 }
 
 interface InterpolatedProjectile {
@@ -47,7 +59,7 @@ interface InterpolatedProjectile {
   y: number;
   targetX: number;
   targetY: number;
-  graphics: Phaser.GameObjects.Ellipse;
+  graphics: Phaser.GameObjects.Container;
 }
 
 interface InterpolatedAsteroid {
@@ -90,6 +102,7 @@ export class ArenaScene extends Phaser.Scene {
   private spectatorIndex = 0;
   private unsubscribeSnapshot: (() => void) | null = null;
   private unsubscribeEliminated: (() => void) | null = null;
+  private explosionEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   constructor() {
     super({ key: 'ArenaScene' });
@@ -101,7 +114,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Procedural particle texture for thrusters/explosions (no assets).
+    // ── Procedural particle textures ──────────────────────────────────────────
     if (!this.textures.exists('particle-dot')) {
       const dot = this.add.graphics();
       dot.fillStyle(0xffffff, 1);
@@ -109,6 +122,48 @@ export class ArenaScene extends Phaser.Scene {
       dot.generateTexture('particle-dot', 8, 8);
       dot.destroy();
     }
+
+    // Soft glowing radial plasma orb for thruster trailers and effects
+    if (!this.textures.exists('particle-glow')) {
+      const canvas = this.textures.createCanvas('particle-glow', 32, 32);
+      if (canvas) {
+        const ctx = canvas.getContext();
+        const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        grad.addColorStop(0.25, 'rgba(255, 255, 255, 0.85)');
+        grad.addColorStop(0.55, 'rgba(255, 255, 255, 0.35)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 32, 32);
+        canvas.refresh();
+      }
+    }
+
+    // Sharp glowing spark particle for high-speed exhaust sparks and impacts
+    if (!this.textures.exists('particle-spark')) {
+      const canvas = this.textures.createCanvas('particle-spark', 8, 8);
+      if (canvas) {
+        const ctx = canvas.getContext();
+        const grad = ctx.createRadialGradient(4, 4, 0, 4, 4, 4);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.8)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 8, 8);
+        canvas.refresh();
+      }
+    }
+
+    // Explosion particle burst emitter (world space)
+    this.explosionEmitter = this.add.particles(0, 0, 'particle-glow', {
+      lifespan: { min: 350, max: 650 },
+      speed: { min: 60, max: 200 },
+      scale: { start: 0.8, end: 0 },
+      alpha: { start: 1, end: 0 },
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    this.explosionEmitter.setDepth(16);
 
     this.createStarfield();
     this.createGrid();
@@ -129,6 +184,10 @@ export class ArenaScene extends Phaser.Scene {
     });
 
     this.unsubscribeEliminated = gameEvents.on('player:eliminated', (entry) => {
+      const victimShip = this.ships.get(entry.victimId);
+      if (victimShip) {
+        this.createExplosion(victimShip.x, victimShip.y, victimShip.color);
+      }
       if (entry.victimId === this.localPlayerId) {
         this.startSpectating();
       }
@@ -142,7 +201,7 @@ export class ArenaScene extends Phaser.Scene {
     this.cameras.main.setZoom(0.8);
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     // Animate starfield parallax
     if (this.starfield) {
       this.starfield.tilePositionX = this.cameras.main.scrollX * 0.1;
@@ -155,6 +214,9 @@ export class ArenaScene extends Phaser.Scene {
     this.interpolateAsteroids(delta);
     this.interpolatePickups(delta);
 
+    // Animate procedural thrusters, dynamic flames, shields & trails
+    this.updateShipEffects(time, delta);
+
     // Update camera
     this.updateCamera();
   }
@@ -163,9 +225,11 @@ export class ArenaScene extends Phaser.Scene {
 
   private processSnapshot(snapshot: GameSnapshot): void {
     const now = Date.now();
+    const seenPlayers = new Set<string>();
 
     // Update ships
     for (const player of snapshot.players) {
+      seenPlayers.add(player.id);
       let ship = this.ships.get(player.id);
       if (!ship) {
         ship = this.createShip(player);
@@ -181,6 +245,16 @@ export class ArenaScene extends Phaser.Scene {
       this.updateShipVisuals(ship, player);
     }
 
+    // Clean up removed/disconnected ships
+    for (const [id, ship] of this.ships) {
+      if (!seenPlayers.has(id)) {
+        ship.graphics.destroy();
+        ship.trailEmitter.destroy();
+        ship.sparkEmitter.destroy();
+        this.ships.delete(id);
+      }
+    }
+
     // Update projectiles
     const seenProjectiles = new Set<string>();
     for (const proj of snapshot.projectiles) {
@@ -193,7 +267,7 @@ export class ArenaScene extends Phaser.Scene {
       interpolated.targetX = proj.x;
       interpolated.targetY = proj.y;
     }
-    // Remove dead projectiles
+    // Remove dead projectiles and add tiny impact spark burst
     for (const [id, proj] of this.projectiles) {
       if (!seenProjectiles.has(id)) {
         proj.graphics.destroy();
@@ -217,6 +291,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     for (const [id, ast] of this.asteroids) {
       if (!seenAsteroids.has(id)) {
+        this.createExplosion(ast.x, ast.y, 0x8b9bb4);
         ast.graphics.destroy();
         this.asteroids.delete(id);
         soundManager.playAsteroidCrunch();
@@ -246,60 +321,84 @@ export class ArenaScene extends Phaser.Scene {
   // ── Ship creation & visuals ───────────────────────────────────────────────
 
   private createShip(player: PlayerState): InterpolatedShip {
+    const isLocal = player.id === this.localPlayerId;
     const color = Phaser.Display.Color.HexStringToColor(
       SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!,
     ).color;
 
-    // Ship hull: triangle pointing right (rotation 0 = facing +X)
-    const hull = this.add.triangle(
-      0,
-      0,
-      0, 0,
-      SHIP_RADIUS * 1.4, 0,
-      SHIP_RADIUS * 0.7, -SHIP_RADIUS * 0.9,
-      color,
-    );
-    hull.setStrokeStyle(2, color, 1);
-    hull.setFillStyle(color, 0.6);
+    // Detailed procedural neon spaceship hull
+    const hullGraphics = this.add.graphics();
+    this.drawDetailedShipHull(hullGraphics, color, isLocal);
 
-    // Thruster particle emitter
-    const thruster = this.add.particles(0, 0, 'particle-dot', {
-      speed: { min: 50, max: 100 },
-      angle: { min: 160, max: 200 },
-      scale: { start: 0.4, end: 0 },
-      lifespan: 300,
-      frequency: 30,
-      tint: color,
-      blendMode: 'ADD',
-    });
-    thruster.setPosition(-SHIP_RADIUS * 0.8, 0);
+    // Dynamic dual exhaust flames (rendered beneath the ship hull)
+    const flameGraphics = this.add.graphics();
 
-    // Shield bubble
-    const shield = this.add.circle(0, 0, SHIP_RADIUS * 1.3, color, 0.15);
-    shield.setStrokeStyle(1, color, 0.5);
-    shield.setVisible(false);
+    // Forcefield energy shield bubble
+    const shieldGraphics = this.add.graphics();
+    shieldGraphics.setVisible(false);
 
     // Health bar background
-    const healthBarBg = this.add.rectangle(0, -SHIP_RADIUS - 15, 40, 4, 0x333333);
+    const healthBarBg = this.add.rectangle(0, -SHIP_RADIUS - 16, 40, 4, 0x1e293b);
     const healthBar = this.add.graphics();
 
     // Name tag
     const nameText = this.add.text(0, -SHIP_RADIUS - 30, player.displayName, {
       fontSize: '12px',
-      color: '#ffffff',
+      color: isLocal ? '#22d3ee' : '#ffffff',
       fontFamily: 'monospace',
     });
     nameText.setOrigin(0.5, 0.5);
 
-    // Container for all ship visuals
-    const graphics = this.add.container(player.x, player.y, [
-      thruster,
-      hull,
-      shield,
+    // Tactical reticle chevron for local player
+    let localIndicator: Phaser.GameObjects.Graphics | undefined;
+    if (isLocal) {
+      localIndicator = this.add.graphics();
+      localIndicator.lineStyle(2, 0x22d3ee, 0.95);
+      localIndicator.beginPath();
+      localIndicator.moveTo(-6, -SHIP_RADIUS - 10);
+      localIndicator.lineTo(0, -SHIP_RADIUS - 5);
+      localIndicator.lineTo(6, -SHIP_RADIUS - 10);
+      localIndicator.strokePath();
+    }
+
+    // Container holding all local ship components (depth 10)
+    const containerChildren: Phaser.GameObjects.GameObject[] = [
+      flameGraphics,
+      hullGraphics,
+      shieldGraphics,
       healthBarBg,
       healthBar,
       nameText,
-    ]);
+    ];
+    if (localIndicator) {
+      containerChildren.push(localIndicator);
+    }
+
+    const graphics = this.add.container(player.x, player.y, containerChildren);
+    graphics.setDepth(10);
+
+    // World-space thruster wake trailer particle emitters (depth 5 & 6)
+    const trailEmitter = this.add.particles(0, 0, 'particle-glow', {
+      lifespan: { min: 380, max: 620 },
+      speed: { min: 15, max: 40 },
+      scale: { start: 0.55, end: 0.02 },
+      alpha: { start: 0.75, end: 0 },
+      blendMode: 'ADD',
+      tint: color,
+      emitting: false,
+    });
+    trailEmitter.setDepth(5);
+
+    const sparkEmitter = this.add.particles(0, 0, 'particle-spark', {
+      lifespan: { min: 140, max: 280 },
+      speed: { min: 30, max: 80 },
+      scale: { start: 0.8, end: 0 },
+      alpha: { start: 0.95, end: 0 },
+      blendMode: 'ADD',
+      tint: 0xffffff,
+      emitting: false,
+    });
+    sparkEmitter.setDepth(6);
 
     const ship: InterpolatedShip = {
       id: player.id,
@@ -313,44 +412,350 @@ export class ArenaScene extends Phaser.Scene {
       prevY: player.y,
       prevRotation: player.rotation,
       lastUpdate: Date.now(),
+      color,
+      speed: 0,
+      alive: player.alive,
+      hasShield: player.shield > 0,
+      spawnProtectedUntil: player.spawnProtectedUntil,
+      trailAccumulator: 0,
+      flickerOffset: (player.id.charCodeAt(0) || 0) * 17,
       graphics,
-      shield,
+      hullGraphics,
+      flameGraphics,
+      shieldGraphics,
       healthBar,
       nameText,
-      thruster,
+      localIndicator,
+      trailEmitter,
+      sparkEmitter,
     };
-
-    // Highlight local player
-    if (player.id === this.localPlayerId) {
-      hull.setFillStyle(color, 0.9);
-      nameText.setColor('#00ffff');
-    }
 
     return ship;
   }
 
+  /**
+   * Procedurally draws a sleek, detailed sci-fi space interceptor with
+   * swept wings, armor plating, dual blaster cannons, cockpit canopy with
+   * reflection gleam, engine nacelles, and navigation lights.
+   */
+  private drawDetailedShipHull(g: Phaser.GameObjects.Graphics, color: number, isLocal: boolean): void {
+    g.clear();
+
+    // ── 1. Base Armored Hull Outline & Polygon ────────────────────────────────
+    // Faceted space interceptor silhouette facing +X (nose at +24, wingspan ±21.5)
+    const hullPoints: Phaser.Types.Math.Vector2Like[] = [
+      { x: 24, y: 0 },       // Nose cone tip
+      { x: 15, y: -4.5 },    // Forward chine slope
+      { x: 7, y: -7 },       // Leading strake root
+      { x: -5, y: -20 },     // Swept wing leading edge
+      { x: 4, y: -20 },      // Left wingtip weapon launcher rail
+      { x: 4, y: -21.5 },    // Left wingtip outer corner
+      { x: -8, y: -21.5 },   // Left wingtip trailing edge
+      { x: -11, y: -16 },    // Left wing root notch
+      { x: -9, y: -11 },     // Left wing trailing inner notch
+      { x: -16, y: -11 },    // Left engine nacelle outer corner
+      { x: -16, y: -4 },     // Left engine exhaust nozzle port
+      { x: -12, y: 0 },      // Rear center keel notch
+      { x: -16, y: 4 },      // Right engine exhaust nozzle port
+      { x: -16, y: 11 },     // Right engine nacelle outer corner
+      { x: -9, y: 11 },      // Right wing trailing inner notch
+      { x: -11, y: 16 },     // Right wing root notch
+      { x: -8, y: 21.5 },    // Right wingtip trailing edge
+      { x: 4, y: 21.5 },     // Right wingtip outer corner
+      { x: 4, y: 20 },       // Right wingtip weapon launcher rail
+      { x: -5, y: 20 },      // Swept wing leading edge
+      { x: 7, y: 7 },        // Leading strake root
+      { x: 15, y: 4.5 },     // Forward chine slope
+    ];
+
+    // Dark armored hull base fill
+    g.fillStyle(0x0a0f24, 0.95);
+    g.fillPoints(hullPoints, true);
+
+    // ── 2. Wing Armor Plating Panels (Dual Tone) ──────────────────────────────
+    // Upper wing panel plate
+    g.fillStyle(0x131d3b, 0.85);
+    g.fillPoints([
+      { x: 6, y: -6.5 },
+      { x: -4, y: -18 },
+      { x: -8, y: -15 },
+      { x: -7, y: -9 },
+    ], true);
+
+    // Lower wing panel plate
+    g.fillPoints([
+      { x: 6, y: 6.5 },
+      { x: -4, y: 18 },
+      { x: -8, y: 15 },
+      { x: -7, y: 9 },
+    ], true);
+
+    // Center fuselage armored spine plate
+    g.fillStyle(0x10172e, 0.9);
+    g.fillPoints([
+      { x: 15, y: 0 },
+      { x: 5, y: -4.5 },
+      { x: -5, y: -4.5 },
+      { x: -11, y: 0 },
+      { x: -5, y: 4.5 },
+      { x: 5, y: 4.5 },
+    ], true);
+
+    // ── 3. Engine Nacelles & Exhaust Ports ─────────────────────────────────────
+    // Left engine nacelle body
+    g.fillStyle(0x172554, 0.9);
+    g.fillRect(-16, -11, 7, 7);
+    // Right engine nacelle body
+    g.fillRect(-16, 4, 7, 7);
+
+    // Engine intake/nozzle rings (metallic rims)
+    g.lineStyle(1.5, 0x334155, 1);
+    g.strokeRect(-16, -11, 7, 7);
+    g.strokeRect(-16, 4, 7, 7);
+
+    // Engine exhaust nozzle ports (inner glowing rim)
+    g.lineStyle(2, color, 0.9);
+    g.lineBetween(-16, -10.5, -16, -4.5);
+    g.lineBetween(-16, 4.5, -16, 10.5);
+
+    // ── 4. Main Hull Neon Vector Stroke & Panel Creases ───────────────────────
+    // Vibrant neon outer perimeter
+    g.lineStyle(isLocal ? 2.5 : 2, color, isLocal ? 1 : 0.9);
+    g.strokePoints(hullPoints, true);
+
+    // Subtle neon inner panel accent lines
+    g.lineStyle(1, color, 0.45);
+    g.lineBetween(6, -6.5, -4, -18);
+    g.lineBetween(6, 6.5, -4, 18);
+    g.lineBetween(23, 0, 14, 0);
+    g.lineBetween(-3, 0, -11, 0);
+
+    // ── 5. Wingtip Laser Blaster Cannons ───────────────────────────────────────
+    // Left cannon barrel
+    g.lineStyle(2, 0x64748b, 1);
+    g.lineBetween(-4, -20.5, 6, -20.5);
+    // Right cannon barrel
+    g.lineBetween(-4, 20.5, 6, 20.5);
+
+    // Glowing energy tips on the gun muzzles
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(6.5, -20.5, 1.8);
+    g.fillCircle(6.5, 20.5, 1.8);
+    g.fillStyle(color, 0.85);
+    g.fillCircle(6.5, -20.5, 3);
+    g.fillCircle(6.5, 20.5, 3);
+
+    // ── 6. Cockpit Canopy (Fighter Jet Diamond Visor) ──────────────────────────
+    const canopyPoints: Phaser.Types.Math.Vector2Like[] = [
+      { x: 13, y: 0 },
+      { x: 2.5, y: -4 },
+      { x: -3, y: 0 },
+      { x: 2.5, y: 4 },
+    ];
+    // Translucent electric neon visor glass
+    g.fillStyle(0x00f5ff, 0.75);
+    g.fillPoints(canopyPoints, true);
+
+    // Cockpit neon frame
+    g.lineStyle(1.5, 0xe0f2fe, 0.95);
+    g.strokePoints(canopyPoints, true);
+
+    // Specular glass glare highlight streak
+    g.lineStyle(1, 0xffffff, 0.9);
+    g.lineBetween(10, -1.2, 1, -3);
+
+    // ── 7. Wingtip Navigation Beacons ─────────────────────────────────────────
+    // Port wingtip: Ruby Red LED
+    g.fillStyle(0xf43f5e, 0.9);
+    g.fillCircle(-6, -21.5, 1.8);
+    // Starboard wingtip: Emerald Green LED
+    g.fillStyle(0x10b981, 0.9);
+    g.fillCircle(-6, 21.5, 1.8);
+  }
+
   private updateShipVisuals(ship: InterpolatedShip, player: PlayerState): void {
+    ship.speed = Math.hypot(player.velocityX, player.velocityY);
+    ship.alive = player.alive;
+    ship.hasShield = player.shield > 0;
+    ship.spawnProtectedUntil = player.spawnProtectedUntil;
+
     // Update health bar
     const healthPercent = player.health / player.maxHealth;
     ship.healthBar.clear();
     const barWidth = 36;
     const barHeight = 4;
     const barX = -barWidth / 2;
-    const barY = -SHIP_RADIUS - 15;
+    const barY = -SHIP_RADIUS - 16;
     ship.healthBar.fillStyle(healthPercent > 0.5 ? 0x00ff00 : healthPercent > 0.25 ? 0xffff00 : 0xff0000);
     ship.healthBar.fillRect(barX, barY, barWidth * healthPercent, barHeight);
 
-    // Shield bubble
-    ship.shield.setVisible(player.shield > 0 || Date.now() < player.spawnProtectedUntil);
-
-    // Thruster intensity based on velocity
-    const speed = Math.hypot(player.velocityX, player.velocityY);
-    ship.thruster.frequency = speed > 10 ? 20 : 200;
-
-    // Fade out dead ships
+    // Visual fading for eliminated ships
     if (!player.alive) {
-      ship.graphics.setAlpha(0.3);
-      ship.thruster.stop();
+      ship.graphics.setAlpha(0.25);
+      ship.flameGraphics.clear();
+    } else {
+      ship.graphics.setAlpha(1.0);
+    }
+  }
+
+  // ── Dynamic Thrusters, Flames, Shields & Trails ───────────────────────────
+
+  private updateShipEffects(time: number, delta: number): void {
+    for (const ship of this.ships.values()) {
+      this.updateShipFlames(ship, time);
+      this.updateShipShield(ship, time);
+
+      // Pulse local indicator
+      if (ship.localIndicator) {
+        ship.localIndicator.setAlpha(0.6 + 0.4 * Math.sin(time * 0.005));
+      }
+
+      this.updateShipTrails(ship, delta);
+    }
+  }
+
+  /**
+   * Renders twin dynamic rocket exhaust plumes extending backwards from
+   * the engine nozzles (-16, -7.5) and (-16, +7.5), complete with high-frequency
+   * flicker, speed scaling, and white-hot inner core plasma.
+   */
+  private updateShipFlames(ship: InterpolatedShip, time: number): void {
+    const fg = ship.flameGraphics;
+    fg.clear();
+
+    if (!ship.alive) return;
+
+    const speed = ship.speed;
+    const throttle = Math.min(1, speed / SHIP_MAX_SPEED);
+
+    if (speed > 12) {
+      // Active thrusting: twin elongated rocket exhaust flames
+      const baseLen = 10 + throttle * 22;
+      const flicker = Math.sin(time * 0.05 + ship.flickerOffset) * 3 + (Math.random() - 0.5) * 4;
+      const flameLen = Math.max(6, baseLen + flicker);
+      const flameHalfWidth = 3.2;
+
+      // Outer plasma flame (ship neon tint)
+      fg.fillStyle(ship.color, 0.85);
+      // Left outer flame
+      fg.fillTriangle(
+        -16, -7.5 - flameHalfWidth,
+        -16, -7.5 + flameHalfWidth,
+        -16 - flameLen, -7.5,
+      );
+      // Right outer flame
+      fg.fillTriangle(
+        -16, 7.5 - flameHalfWidth,
+        -16, 7.5 + flameHalfWidth,
+        -16 - flameLen, 7.5,
+      );
+
+      // Inner core flame (bright white-hot plasma)
+      const coreLen = flameLen * 0.55;
+      const coreHalfWidth = 1.6;
+      fg.fillStyle(0xffffff, 0.95);
+      // Left inner core
+      fg.fillTriangle(
+        -16, -7.5 - coreHalfWidth,
+        -16, -7.5 + coreHalfWidth,
+        -16 - coreLen, -7.5,
+      );
+      // Right inner core
+      fg.fillTriangle(
+        -16, 7.5 - coreHalfWidth,
+        -16, 7.5 + coreHalfWidth,
+        -16 - coreLen, 7.5,
+      );
+    } else {
+      // Idle engine hum: subtle glowing pilot flames
+      const idleLen = 4 + Math.sin(time * 0.008 + ship.flickerOffset) * 1.5;
+      const idleAlpha = 0.45 + Math.sin(time * 0.006) * 0.2;
+      fg.fillStyle(ship.color, idleAlpha);
+      fg.fillTriangle(-16, -9.5, -16, -5.5, -16 - idleLen, -7.5);
+      fg.fillTriangle(-16, 5.5, -16, 9.5, -16 - idleLen, 7.5);
+      // Tiny white center
+      fg.fillStyle(0xffffff, idleAlpha * 0.8);
+      fg.fillTriangle(-16, -8.5, -16, -6.5, -16 - idleLen * 0.5, -7.5);
+      fg.fillTriangle(-16, 6.5, -16, 8.5, -16 - idleLen * 0.5, 7.5);
+    }
+  }
+
+  /**
+   * Emits glowing neon particles into world space at both engine nozzles
+   * to create authentic lingering plasma thruster wake trails (trailers)
+   * that follow the ship's curved flight path.
+   */
+  private updateShipTrails(ship: InterpolatedShip, delta: number): void {
+    if (!ship.alive) return;
+
+    const speed = ship.speed;
+    if (speed <= 12) return;
+
+    // Calculate world coordinates of twin exhaust nozzles (-16, -7.5) and (-16, +7.5)
+    const cos = Math.cos(ship.rotation);
+    const sin = Math.sin(ship.rotation);
+
+    const leftX = ship.x - cos * 16 + sin * 7.5;
+    const leftY = ship.y - sin * 16 - cos * 7.5;
+
+    const rightX = ship.x - cos * 16 - sin * 7.5;
+    const rightY = ship.y - sin * 16 + cos * 7.5;
+
+    ship.trailAccumulator += delta;
+    // Faster speed = higher trail frequency so there are no gaps in the trail
+    const emitInterval = Math.max(16, 36 - (speed / SHIP_MAX_SPEED) * 20);
+
+    while (ship.trailAccumulator >= emitInterval) {
+      ship.trailAccumulator -= emitInterval;
+
+      // Emit glowing plasma trailer particles from both nozzles into world space
+      ship.trailEmitter.emitParticleAt(leftX, leftY, 1);
+      ship.trailEmitter.emitParticleAt(rightX, rightY, 1);
+
+      // High-speed energetic exhaust sparks
+      if (speed > 160 && Math.random() < 0.6) {
+        ship.sparkEmitter.emitParticleAt(leftX, leftY, 1);
+        ship.sparkEmitter.emitParticleAt(rightX, rightY, 1);
+      }
+    }
+  }
+
+  /**
+   * Animates a rotating, pulsing energy shield forcefield bubble.
+   */
+  private updateShipShield(ship: InterpolatedShip, time: number): void {
+    const sg = ship.shieldGraphics;
+    sg.clear();
+
+    const isSpawnProtected = Date.now() < ship.spawnProtectedUntil;
+    const hasShield = ship.hasShield || isSpawnProtected;
+
+    if (!hasShield || !ship.alive) {
+      sg.setVisible(false);
+      return;
+    }
+
+    sg.setVisible(true);
+    const shieldColor = isSpawnProtected ? 0xfde047 : 0x38bdf8;
+    const pulseAlpha = 0.5 + 0.3 * Math.sin(time * 0.006 + ship.flickerOffset);
+
+    // Outer shield perimeter ring
+    sg.lineStyle(2, shieldColor, pulseAlpha);
+    sg.strokeCircle(0, 0, SHIP_RADIUS * 1.35);
+
+    // Translucent shield bubble fill
+    sg.fillStyle(shieldColor, 0.12);
+    sg.fillCircle(0, 0, SHIP_RADIUS * 1.35);
+
+    // Three rotating high-energy shield arc segments
+    const arcOffset = time * 0.002;
+    sg.lineStyle(2.5, 0xffffff, pulseAlpha * 0.9);
+    for (let i = 0; i < 3; i++) {
+      const startAngle = arcOffset + (i * Math.PI * 2) / 3;
+      const endAngle = startAngle + 0.7;
+      sg.beginPath();
+      sg.arc(0, 0, SHIP_RADIUS * 1.35, startAngle, endAngle);
+      sg.strokePath();
     }
   }
 
@@ -362,9 +767,15 @@ export class ArenaScene extends Phaser.Scene {
     const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
     const radius = isMeteor ? 14 : 5;
 
-    const graphics = this.add.ellipse(proj.x, proj.y, radius * 2, radius * 2, color);
-    graphics.setStrokeStyle(1, color, 0.8);
-    graphics.setFillStyle(color, 0.6);
+    const container = this.add.container(proj.x, proj.y);
+    container.setDepth(12);
+
+    // Outer plasma glow
+    const glow = this.add.circle(0, 0, radius * 1.6, color, 0.3);
+    // Core bolt elongated in flight direction
+    const core = this.add.ellipse(0, 0, radius * 2.4, radius * 1.1, 0xffffff, 0.95);
+    core.setStrokeStyle(1.5, color, 0.95);
+    container.add([glow, core]);
 
     return {
       id: proj.id,
@@ -372,7 +783,7 @@ export class ArenaScene extends Phaser.Scene {
       y: proj.y,
       targetX: proj.x,
       targetY: proj.y,
-      graphics,
+      graphics: container,
     };
   }
 
@@ -498,6 +909,26 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
+  // ── Explosions ────────────────────────────────────────────────────────────
+
+  private createExplosion(x: number, y: number, color: number): void {
+    if (this.explosionEmitter) {
+      this.explosionEmitter.emitParticleAt(x, y, 24);
+    }
+    // Expanding neon shockwave ring
+    const ring = this.add.circle(x, y, 6);
+    ring.setStrokeStyle(3, color, 1);
+    ring.setDepth(18);
+    this.tweens.add({
+      targets: ring,
+      radius: 64,
+      alpha: 0,
+      duration: 380,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   // ── Interpolation ─────────────────────────────────────────────────────────
 
   private interpolateShips(delta: number): void {
@@ -518,6 +949,11 @@ export class ArenaScene extends Phaser.Scene {
   private interpolateProjectiles(delta: number): void {
     const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
     for (const proj of this.projectiles.values()) {
+      const dx = proj.targetX - proj.x;
+      const dy = proj.targetY - proj.y;
+      if (Math.hypot(dx, dy) > 0.01) {
+        proj.graphics.setRotation(Math.atan2(dy, dx));
+      }
       proj.x = Phaser.Math.Linear(proj.x, proj.targetX, factor);
       proj.y = Phaser.Math.Linear(proj.y, proj.targetY, factor);
       proj.graphics.setPosition(proj.x, proj.y);
@@ -580,6 +1016,13 @@ export class ArenaScene extends Phaser.Scene {
     this.spectatorIndex = Math.max(0, this.spectatorIndex - 1);
   }
 
+  getCurrentSpectatorTargetName(): string | null {
+    const targetId = this.getSpectatorTarget();
+    if (!targetId) return null;
+    const player = this.latestSnapshot?.players.find((p) => p.id === targetId);
+    return player?.displayName ?? null;
+  }
+
   private handleLocalInput(input: PlayerInput): void {
     // Calculate aim angle from local ship position
     const localShip = this.localPlayerId ? this.ships.get(this.localPlayerId) : null;
@@ -599,10 +1042,15 @@ export class ArenaScene extends Phaser.Scene {
     this.unsubscribeSnapshot?.();
     this.unsubscribeEliminated?.();
     this.inputManager.detach();
-    for (const ship of this.ships.values()) ship.graphics.destroy();
+    for (const ship of this.ships.values()) {
+      ship.graphics.destroy();
+      ship.trailEmitter.destroy();
+      ship.sparkEmitter.destroy();
+    }
     for (const proj of this.projectiles.values()) proj.graphics.destroy();
     for (const ast of this.asteroids.values()) ast.graphics.destroy();
     for (const pickup of this.pickups.values()) pickup.graphics.destroy();
+    if (this.explosionEmitter) this.explosionEmitter.destroy();
     this.ships.clear();
     this.projectiles.clear();
     this.asteroids.clear();

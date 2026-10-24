@@ -1,0 +1,32 @@
+services:
+  # Authoritative Game Server (Node.js + Socket.IO)
+  - type: web
+    name: last-star-standing-server
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build --workspace=@lss/shared
+    startCommand: npm start --workspace=@lss/server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGINS
+        value: "*"
+    healthCheckPath: /health
+
+  # Web Client (Vite + React + Phaser 3 Static Site)
+  - type: static
+    name: last-star-standing-web
+    buildCommand: npm install && npm run build --workspace=@lss/shared && npm run build --workspace=@lss/web
+    staticPublishPath: apps/web/dist
+    envVars:
+      - key: VITE_SERVER_URL
+        fromService:
+          type: web
+          name: last-star-standing-server
+          property: host
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -184,7 +184,7 @@ export class InputManager {
 
   private buildInput(): PlayerInput {
     // Keyboard movement
-    const up = this.keys.has('w') || this.keys.has('arrowup') || this.keys.has(' ');
+    const up = this.keys.has('w') || this.keys.has('arrowup');
     const down = this.keys.has('s') || this.keys.has('arrowdown');
     const left = this.keys.has('a') || this.keys.has('arrowleft');
     const right = this.keys.has('d') || this.keys.has('arrowright');
@@ -203,7 +203,7 @@ export class InputManager {
       left: left || joystickLeft,
       right: right || joystickRight,
       aimAngle: 0, // Calculated in getCurrentInput or emitInput
-      shooting: this.mouseDown || this.touchFire,
+      shooting: this.mouseDown || this.touchFire || this.keys.has(' '),
       sequence: ++this.sequence,
     };
   }

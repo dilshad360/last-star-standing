@@ -1,6 +1,6 @@
 # Phase 5: React UI Shell, Instant QR Lobby, Live HUD, Spectator & Winner Screens (`apps/web`)
 
-**Status:** Pending  
+**Status:** Completed  
 **Command to execute:** `/run-phase 5`  
 **Owner Agent:** `phaser-renderer`
 
@@ -43,8 +43,10 @@ npm run build
 npm run dev
 ```
 
-### Interactive Test Steps After Phase 5
-1. Open `http://localhost:5173` in **Tab 1**, enter your name, and click **Create Room** (or **Quick Play**).
-2. Copy the `?room=CODE` share link (or scan the QR code) and open it in **Tab 2** — confirm Tab 2 auto-fills the room code and joins the same lobby.
-3. Adjust the **AI Bot Pilots** slider (`e.g., 4 bots`), click **Ready / Launch Match**, and play through the 3-2-1 countdown.
-4. Verify HUD health/shield bars, mini-radar, kill feed, storm warning, spectator mode when eliminated, the **Winner Screen**, and clicking **Play Again** without reloading the page.
+### Phase 5 Exit Criteria (Definition of Done)
+- [x] Landing Screen with `?room=CODE` auto-fill, custom callsign input, and instant Quick Play into bot matches.
+- [x] Lobby Screen with large 4-character Room Code badge, inline SVG QR Code for instant mobile/judge scanning, and Host AI Bot count slider (`0–7` bots).
+- [x] Live Gameplay HUD with health/shield bars, active upgrade timers, live kill feed, real-time mini-radar, storm damage alert, and cosmic event banners.
+- [x] Eliminated Spectator Overlay with placement callout and camera switcher (`◀ PREV` / `NEXT ▶`).
+- [x] Winner Scoreboard Screen displaying champion spotlight, full statistics table (kills, damage, survival time), and instant rematch button.
+- [x] Production build passes cleanly across all workspaces (`npm run build`).
