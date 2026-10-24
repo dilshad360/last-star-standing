@@ -1,0 +1,55 @@
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
+import cors from 'cors';
+import express from 'express';
+import { Server } from 'socket.io';
+import type { ClientToServerEvents, ServerToClientEvents } from '@lss/shared';
+import { env } from './config/env.js';
+import { registerSocketHandlers } from './networking/socketHandlers.js';
+import { RoomManager } from './rooms/RoomManager.js';
+import type { SimulationFactory, TypedServer } from './rooms/GameRoom.js';
+
+export interface GameServer {
+  httpServer: HttpServer;
+  io: TypedServer;
+  roomManager: RoomManager;
+}
+
+export function createGameServer(simulationFactory?: SimulationFactory): GameServer {
+  const app = express();
+  app.use(cors({ origin: env.corsOrigins }));
+  app.use(express.json());
+
+  const httpServer = createHttpServer(app);
+  const io: TypedServer = new Server<ClientToServerEvents, ServerToClientEvents>(
+    httpServer,
+    {
+      cors: { origin: env.corsOrigins, methods: ['GET', 'POST'] },
+    },
+  );
+  const roomManager = new RoomManager(io, simulationFactory);
+
+  app.get('/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      rooms: roomManager.roomCount,
+      players: roomManager.playerCount,
+      uptimeSeconds: Math.round(process.uptime()),
+    });
+  });
+
+  io.on('connection', (socket) => registerSocketHandlers(socket, roomManager));
+
+  return { httpServer, io, roomManager };
+}
+
+const invokedAs = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';
+if (import.meta.url === invokedAs) {
+  const { httpServer } = createGameServer();
+  httpServer.listen(env.port, () => {
+    console.log(
+      `[lss-server] listening on http://localhost:${env.port} (env: ${env.nodeEnv})`,
+    );
+    console.log(`[lss-server] health check: http://localhost:${env.port}/health`);
+  });
+}

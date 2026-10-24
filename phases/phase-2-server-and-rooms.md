@@ -1,6 +1,6 @@
 # Phase 2: Multiplayer Server & Room Lifecycle (`apps/server`)
 
-**Status:** Pending  
+**Status:** Completed  
 **Command to execute:** `/run-phase 2`  
 **Owner Agent:** `netcode-architect`
 
@@ -37,9 +37,9 @@ npm run dev --workspace=@lss/server
 ```
 
 ### Phase 2 Exit Criteria (Definition of Done)
-- [ ] `GET http://localhost:3001/health` returns `{ status: "ok", rooms: 0, ... }`.
-- [ ] Creating a room returns a valid 4-character room code.
-- [ ] Joining with a second client updates the lobby player list for all connected clients.
-- [ ] Invalid or full room codes return clear error messages without crashing the server.
-- [ ] Host can configure AI Bot count (`0–7`) and start the 3-second countdown into `ACTIVE`.
-- [ ] Disconnecting the host automatically transfers host privileges to the next human player.
+- [x] `GET http://localhost:3001/health` returns `{ status: "ok", rooms: 0, ... }`.
+- [x] Creating a room returns a valid 4-character room code.
+- [x] Joining with a second client updates the lobby player list for all connected clients.
+- [x] Invalid or full room codes return clear error messages without crashing the server.
+- [x] Host can configure AI Bot count (`0–7`) and start the 3-second countdown into `ACTIVE`.
+- [x] Disconnecting the host automatically transfers host privileges to the next human player.
