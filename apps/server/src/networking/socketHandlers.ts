@@ -63,6 +63,8 @@ function validateInput(raw: unknown): PlayerInput | null {
     aimAngle: input.aimAngle,
     shooting: input.shooting === true,
     sequence: input.sequence,
+    drift: input.drift === true,
+    boost: input.boost === true,
   };
 }
 

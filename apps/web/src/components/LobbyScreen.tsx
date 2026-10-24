@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { RoomInfo } from '@lss/shared';
 import { MAX_BOTS_PER_ROOM, SHIP_COLORS } from '@lss/shared';
 import { QrCodeSvg } from './QrCodeSvg.js';
+import { CopyIcon, CheckIcon, UsersIcon, BotIcon, PlayIcon } from './icons.js';
 
 interface LobbyScreenProps {
   room: RoomInfo;
@@ -80,22 +81,30 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'radial-gradient(ellipse at center, #0c122c 0%, #05050f 100%)',
+        background: 'radial-gradient(ellipse at center, #09122c 0%, #03050e 100%)',
         padding: 20,
         zIndex: 20,
       }}
     >
+      {/* Cockpit Canopy Frame & Brackets */}
+      <div className="cockpit-visor-frame" />
+      <div className="cockpit-bracket-tl" />
+      <div className="cockpit-bracket-tr" />
+      <div className="cockpit-bracket-bl" />
+      <div className="cockpit-bracket-br" />
+
       <div
-        className="glass-panel-glow"
+        className="cockpit-panel-glow"
         style={{
           width: '100%',
           maxWidth: 820,
           maxHeight: '92vh',
           display: 'flex',
           flexDirection: 'column',
-          padding: '24px 32px',
+          padding: '24px 30px',
           overflowY: 'auto',
           position: 'relative',
+          zIndex: 10,
         }}
       >
         {/* Top Header: Room Code & Actions */}
@@ -105,14 +114,16 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             flexWrap: 'wrap',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderBottom: '1px solid rgba(34, 211, 238, 0.25)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
             paddingBottom: 16,
             marginBottom: 20,
             gap: 12,
           }}
         >
           <div>
-            <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 2 }}>ORBITAL LOBBY CODE</div>
+            <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 2, fontWeight: 'bold' }}>
+              GAME ROOM
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
               <span
                 onClick={copyCode}
@@ -130,9 +141,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               <button
                 onClick={copyCode}
                 className="btn-neon-outline"
-                style={{ padding: '4px 10px', fontSize: 11 }}
+                style={{ padding: '4px 10px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                {copiedCode ? 'COPIED!' : 'COPY CODE'}
+                {copiedCode ? <CheckIcon size={12} color="#22c55e" /> : <CopyIcon size={12} />}
+                {copiedCode ? 'Copied' : 'Copy Code'}
               </button>
             </div>
           </div>
@@ -140,57 +152,58 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={copyLink}
-              className="btn-neon-cyan"
-              style={{ padding: '8px 16px', fontSize: 12 }}
+              className="btn-neon-orange"
+              style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
             >
-              {copiedLink ? '✓ LINK COPIED!' : '🔗 COPY JOIN LINK'}
+              {copiedLink ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+              {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
             </button>
             <button
               onClick={onLeaveRoom}
               className="btn-neon-outline"
-              style={{ padding: '8px 14px', fontSize: 12, borderColor: '#f43f5e', color: '#f43f5e' }}
+              style={{ padding: '8px 14px', fontSize: 12, borderColor: '#ef4444', color: '#ef4444' }}
             >
-              LEAVE
+              Leave Room
             </button>
           </div>
         </div>
 
         {/* Content: Pilots List (Left) & QR Code / Match Settings (Right) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
-          {/* Left Column: Connected Pilots */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 24 }}>
+          {/* Left Column: Connected Players */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 12 }}>
-              <span style={{ color: '#94a3b8', fontWeight: 'bold', letterSpacing: 1 }}>
-                CONNECTED PILOTS ({room.players.length} / {room.maxPlayers})
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 12, alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <UsersIcon size={14} color="#f97316" /> Players ({room.players.length} / {room.maxPlayers})
               </span>
-              <span style={{ color: '#22d3ee' }}>
-                {room.players.filter((p) => p.isReady).length} READY
+              <span style={{ color: '#22c55e', fontWeight: 600 }}>
+                {room.players.filter((p) => p.isReady).length} Ready
               </span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {room.players.map((p) => {
-                const colorHex = SHIP_COLORS[p.colorIndex % SHIP_COLORS.length] ?? '#22d3ee';
+                const colorHex = SHIP_COLORS[p.colorIndex % SHIP_COLORS.length] ?? '#38bdf8';
                 const isMe = p.id === localPlayerId;
 
                 return (
                   <div
                     key={p.id}
-                    className="glass-panel"
+                    className="cockpit-panel"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '10px 14px',
                       borderLeft: `4px solid ${colorHex}`,
-                      background: isMe ? 'rgba(34, 211, 238, 0.08)' : 'rgba(15, 23, 42, 0.6)',
+                      background: isMe ? 'rgba(56, 189, 248, 0.10)' : 'rgba(10, 16, 36, 0.7)',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div
                         style={{
-                          width: 12,
-                          height: 12,
+                          width: 10,
+                          height: 10,
                           borderRadius: '50%',
                           backgroundColor: colorHex,
                           boxShadow: `0 0 8px ${colorHex}`,
@@ -200,24 +213,24 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                         style={{
                           fontSize: 14,
                           fontWeight: isMe ? 'bold' : 'normal',
-                          color: isMe ? '#22d3ee' : '#f1f5f9',
+                          color: isMe ? '#38bdf8' : '#f1f5f9',
                         }}
                       >
-                        {p.displayName} {isMe && '(YOU)'}
+                        {p.displayName} {isMe && '(You)'}
                       </span>
                       {p.isHost && (
                         <span
                           style={{
                             fontSize: 10,
-                            background: 'rgba(253, 224, 71, 0.15)',
-                            color: '#fde047',
-                            border: '1px solid rgba(253, 224, 71, 0.4)',
-                            borderRadius: 3,
+                            background: 'rgba(249, 115, 22, 0.15)',
+                            color: '#f97316',
+                            border: '1px solid rgba(249, 115, 22, 0.4)',
+                            borderRadius: 2,
                             padding: '1px 5px',
                             fontWeight: 'bold',
                           }}
                         >
-                          HOST
+                          Host
                         </span>
                       )}
                     </div>
@@ -227,15 +240,15 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                         <span
                           style={{
                             fontSize: 11,
-                            color: '#10b981',
+                            color: '#22c55e',
                             fontWeight: 'bold',
-                            border: '1px solid rgba(16, 185, 129, 0.4)',
+                            border: '1px solid rgba(34, 197, 94, 0.4)',
                             padding: '2px 8px',
-                            borderRadius: 4,
-                            background: 'rgba(16, 185, 129, 0.1)',
+                            borderRadius: 2,
+                            background: 'rgba(34, 197, 94, 0.1)',
                           }}
                         >
-                          READY
+                          Ready
                         </span>
                       ) : (
                         <span
@@ -244,10 +257,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                             color: '#94a3b8',
                             border: '1px solid rgba(148, 163, 184, 0.3)',
                             padding: '2px 8px',
-                            borderRadius: 4,
+                            borderRadius: 2,
                           }}
                         >
-                          WAITING
+                          Waiting
                         </span>
                       )}
                     </div>
@@ -261,14 +274,18 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   style={{
                     padding: '8px 14px',
                     fontSize: 12,
-                    color: '#64748b',
-                    background: 'rgba(15, 23, 42, 0.3)',
+                    color: '#94a3b8',
+                    background: 'rgba(10, 16, 36, 0.4)',
                     border: '1px dashed rgba(100, 116, 139, 0.4)',
                     borderRadius: 4,
                     textAlign: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
                   }}
                 >
-                  🤖 +{room.botCount} Autonomous AI Bot Pilots will deploy on launch
+                  <BotIcon size={14} color="#f97316" /> +{room.botCount} AI Bots will join when match starts
                 </div>
               )}
             </div>
@@ -276,9 +293,9 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
           {/* Right Column: QR Code & Match Controls */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Inline SVG QR Code Card for Mobile / Judge Join */}
+            {/* Inline SVG QR Code Card for Mobile / Secondary Players */}
             <div
-              className="glass-panel"
+              className="cockpit-panel"
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -287,26 +304,26 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1, marginBottom: 10 }}>
-                SCAN TO JOIN INSTANTLY (MOBILE / JUDGE)
+              <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: 1, marginBottom: 10, fontWeight: 600 }}>
+                SCAN TO JOIN ON PHONE
               </div>
-              <div style={{ padding: 8, background: '#05050f', borderRadius: 8, border: '1px solid rgba(34, 211, 238, 0.3)' }}>
-                <QrCodeSvg value={shareUrl} size={150} fgColor="#22d3ee" bgColor="#05050f" />
+              <div style={{ padding: 8, background: '#040714', borderRadius: 4, border: '1px solid rgba(249, 115, 22, 0.3)' }}>
+                <QrCodeSvg value={shareUrl} size={140} fgColor="#f97316" bgColor="#040714" />
               </div>
-              <div style={{ fontSize: 10, color: '#64748b', marginTop: 8 }}>
-                Share code <span style={{ color: '#22d3ee' }}>{room.code}</span> or link with friends
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
+                Or enter code: <strong style={{ color: '#f8fafc' }}>{room.code}</strong>
               </div>
             </div>
 
             {/* Host Controls: AI Bot Count Slider */}
             {isHost && (
-              <div className="glass-panel" style={{ padding: '14px 16px' }}>
+              <div className="cockpit-panel" style={{ padding: '14px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 'bold' }}>
-                    AI BOT PILOTS (0–{MAX_BOTS_PER_ROOM}):
+                  <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <BotIcon size={14} color="#f97316" /> AI Bots (0–{MAX_BOTS_PER_ROOM}):
                   </span>
-                  <span style={{ fontSize: 14, color: '#22d3ee', fontWeight: 'bold' }}>
-                    {room.botCount} BOTS
+                  <span style={{ fontSize: 13, color: '#f97316', fontWeight: 'bold' }}>
+                    {room.botCount} Bots
                   </span>
                 </div>
                 <input
@@ -315,10 +332,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   max={MAX_BOTS_PER_ROOM}
                   value={room.botCount}
                   onChange={(e) => onSetBotCount(parseInt(e.target.value, 10))}
-                  style={{ width: '100%', accentColor: '#22d3ee', cursor: 'pointer' }}
+                  style={{ width: '100%', accentColor: '#f97316', cursor: 'pointer' }}
                 />
-                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                  Total combatants: {room.players.length + room.botCount} ships
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                  Total players in arena: {room.players.length + room.botCount}
                 </div>
               </div>
             )}
@@ -328,18 +345,18 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               {isHost ? (
                 <button
                   onClick={onStartMatch}
-                  className="btn-neon-gold"
-                  style={{ padding: '14px', fontSize: 15, letterSpacing: 2 }}
+                  className="btn-neon-orange"
+                  style={{ padding: '14px', fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 >
-                  🚀 LAUNCH MATCH
+                  <PlayIcon size={16} /> Start Game
                 </button>
               ) : (
                 <button
                   onClick={() => onSetReady(!isReady)}
-                  className={isReady ? 'btn-neon-outline' : 'btn-neon-cyan'}
-                  style={{ padding: '14px', fontSize: 15, letterSpacing: 2 }}
+                  className={isReady ? 'btn-neon-outline' : 'btn-neon-orange'}
+                  style={{ padding: '14px', fontSize: 15 }}
                 >
-                  {isReady ? 'CANCEL READY' : 'SET READY'}
+                  {isReady ? 'Cancel Ready' : "I'm Ready"}
                 </button>
               )}
             </div>
@@ -352,28 +369,28 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             style={{
               position: 'absolute',
               inset: 0,
-              backgroundColor: 'rgba(5, 5, 15, 0.9)',
-              backdropFilter: 'blur(10px)',
+              backgroundColor: 'rgba(3, 5, 14, 0.92)',
+              backdropFilter: 'blur(12px)',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
               zIndex: 30,
-              borderRadius: 8,
+              borderRadius: 4,
             }}
           >
             <div
               className="countdown-pop title-glow"
               style={{
-                fontSize: 90,
+                fontSize: 88,
                 fontWeight: 900,
-                color: countdownSeconds === 0 ? '#10b981' : '#fde047',
+                color: countdownSeconds === 0 ? '#22c55e' : '#f97316',
               }}
             >
-              {countdownSeconds > 0 ? countdownSeconds : 'ENGAGE!'}
+              {countdownSeconds > 0 ? countdownSeconds : 'GO!'}
             </div>
-            <div style={{ fontSize: 14, color: '#94a3b8', letterSpacing: 3, marginTop: 12 }}>
-              SYSTEMS ARMED · COMMENCING COMBAT
+            <div style={{ fontSize: 13, color: '#94a3b8', letterSpacing: 2, marginTop: 12 }}>
+              Launching into arena...
             </div>
           </div>
         )}

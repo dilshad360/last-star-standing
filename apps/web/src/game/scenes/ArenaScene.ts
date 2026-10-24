@@ -43,12 +43,18 @@ interface InterpolatedShip {
   trailAccumulator: number;
   flickerOffset: number;
   graphics: Phaser.GameObjects.Container;
+  shipVisualContainer: Phaser.GameObjects.Container;
   hullGraphics: Phaser.GameObjects.Graphics;
   flameGraphics: Phaser.GameObjects.Graphics;
+  rcsGraphics: Phaser.GameObjects.Graphics;
   shieldGraphics: Phaser.GameObjects.Graphics;
   healthBar: Phaser.GameObjects.Graphics;
   nameText: Phaser.GameObjects.Text;
   localIndicator?: Phaser.GameObjects.Graphics;
+  hitGraphics: Phaser.GameObjects.Graphics;
+  lastHealth: number;
+  lastShield: number;
+  hitFlashUntil: number;
   trailEmitter: Phaser.GameObjects.Particles.ParticleEmitter;
   sparkEmitter: Phaser.GameObjects.Particles.ParticleEmitter;
 }
@@ -85,7 +91,8 @@ const LERP_FACTOR = 0.2;
 
 /**
  * Main game scene: renders the 2400×2400 neon arena with procedural graphics,
- * interpolates server snapshots, handles input, and manages the camera.
+ * multi-layer parallax space starfields, instant local mouse aim,
+ * snapshot interpolation, weapons physics, and cockpit avionics crosshairs.
  */
 export class ArenaScene extends Phaser.Scene {
   private inputManager!: InputManager;
@@ -95,9 +102,12 @@ export class ArenaScene extends Phaser.Scene {
   private asteroids = new Map<string, InterpolatedAsteroid>();
   private pickups = new Map<string, InterpolatedPickup>();
   private safeZoneGraphics!: Phaser.GameObjects.Graphics;
-  private starfield!: Phaser.GameObjects.TileSprite;
+  private starfieldFar!: Phaser.GameObjects.TileSprite;
+  private starfieldMid!: Phaser.GameObjects.TileSprite;
+  private starfieldNear!: Phaser.GameObjects.TileSprite;
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private boundaryGraphics!: Phaser.GameObjects.Graphics;
+  private planetContainer!: Phaser.GameObjects.Container;
   private latestSnapshot: GameSnapshot | null = null;
   private spectatorIndex = 0;
   private unsubscribeSnapshot: (() => void) | null = null;
@@ -165,15 +175,16 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.explosionEmitter.setDepth(16);
 
-    this.createStarfield();
+    // Build the deep multi-layer cosmic space environment
+    this.createSpaceEnvironment();
     this.createGrid();
     this.createBoundary();
     this.createSafeZone();
 
+
     // Attach input manager to canvas
     const canvas = this.game.canvas;
     this.inputManager.attach(canvas, (input) => {
-      // The scene adds aimAngle and forwards to server via SocketClient
       this.handleLocalInput(input);
     });
 
@@ -201,29 +212,56 @@ export class ArenaScene extends Phaser.Scene {
     this.cameras.main.setZoom(0.8);
   }
 
+  setLocalPlayerId(id: string | null): void {
+    this.localPlayerId = id;
+  }
+
   update(time: number, delta: number): void {
-    // Animate starfield parallax
-    if (this.starfield) {
-      this.starfield.tilePositionX = this.cameras.main.scrollX * 0.1;
-      this.starfield.tilePositionY = this.cameras.main.scrollY * 0.1;
+    // ── 0. Update Input Manager with delta seconds ──────────────────────────
+    this.inputManager.update(delta / 1000);
+
+    // ── 1. Local Ship Heading from Keyboard Steering ────────────────────────
+    if (this.localPlayerId) {
+      const localShip = this.ships.get(this.localPlayerId);
+      if (localShip && localShip.alive) {
+        localShip.rotation = this.inputManager.getFacingAngle();
+        localShip.shipVisualContainer.setRotation(localShip.rotation);
+      }
     }
 
-    // Interpolate all entities
+    // ── 2. Multi-Layer Parallax Starfield & Deep Space Motion ───────────────
+    const cx = this.cameras.main.scrollX;
+    const cy = this.cameras.main.scrollY;
+    if (this.starfieldFar) {
+      this.starfieldFar.tilePositionX = cx * 0.05 + time * 0.001;
+      this.starfieldFar.tilePositionY = cy * 0.05 + time * 0.0005;
+    }
+    if (this.starfieldMid) {
+      this.starfieldMid.tilePositionX = cx * 0.15 + time * 0.002;
+      this.starfieldMid.tilePositionY = cy * 0.15 + time * 0.001;
+    }
+    if (this.starfieldNear) {
+      this.starfieldNear.tilePositionX = cx * 0.35 + time * 0.004;
+      this.starfieldNear.tilePositionY = cy * 0.35 + time * 0.002;
+    }
+
+    // ── 3. Interpolate Entities ─────────────────────────────────────────────
     this.interpolateShips(delta);
     this.interpolateProjectiles(delta);
     this.interpolateAsteroids(delta);
     this.interpolatePickups(delta);
 
-    // Animate procedural thrusters, dynamic flames, shields & trails
+    // ── 4. Dynamic Thruster Flames, RCS Steering & Space Trails ─────────────
     this.updateShipEffects(time, delta);
 
-    // Update camera
+    // ── 5. Update Camera ────────────────────────────────────────────────────
     this.updateCamera();
   }
 
   // ── Snapshot processing ───────────────────────────────────────────────────
 
   private processSnapshot(snapshot: GameSnapshot): void {
+    if (!this.scene?.isActive() || !this.add) return;
     const now = Date.now();
     const seenPlayers = new Set<string>();
 
@@ -267,7 +305,6 @@ export class ArenaScene extends Phaser.Scene {
       interpolated.targetX = proj.x;
       interpolated.targetY = proj.y;
     }
-    // Remove dead projectiles and add tiny impact spark burst
     for (const [id, proj] of this.projectiles) {
       if (!seenProjectiles.has(id)) {
         proj.graphics.destroy();
@@ -286,7 +323,6 @@ export class ArenaScene extends Phaser.Scene {
       }
       interpolated.targetX = ast.x;
       interpolated.targetY = ast.y;
-      // Update crack visibility based on health
       this.updateAsteroidCracks(interpolated, ast);
     }
     for (const [id, ast] of this.asteroids) {
@@ -326,12 +362,15 @@ export class ArenaScene extends Phaser.Scene {
       SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!,
     ).color;
 
-    // Detailed procedural neon spaceship hull
+    // Clean simple procedural neon spaceship hull
     const hullGraphics = this.add.graphics();
-    this.drawDetailedShipHull(hullGraphics, color, isLocal);
+    this.drawSimpleShipHull(hullGraphics, color, isLocal);
 
     // Dynamic dual exhaust flames (rendered beneath the ship hull)
     const flameGraphics = this.add.graphics();
+
+    // RCS reaction control cold-gas thruster jets (steering & retro-braking)
+    const rcsGraphics = this.add.graphics();
 
     // Forcefield energy shield bubble
     const shieldGraphics = this.add.graphics();
@@ -361,11 +400,24 @@ export class ArenaScene extends Phaser.Scene {
       localIndicator.strokePath();
     }
 
-    // Container holding all local ship components (depth 10)
-    const containerChildren: Phaser.GameObjects.GameObject[] = [
+    // Hit flash red damage indicator overlay
+    const hitGraphics = this.add.graphics();
+    hitGraphics.setDepth(3);
+
+    // Rotating container for ship hull, engines, and shields
+    const shipVisuals: Phaser.GameObjects.GameObject[] = [
       flameGraphics,
+      rcsGraphics,
       hullGraphics,
+      hitGraphics,
       shieldGraphics,
+    ];
+    const shipVisualContainer = this.add.container(0, 0, shipVisuals);
+    shipVisualContainer.setRotation(player.rotation);
+
+    // Root container holding rotating ship + always-upright HUD elements
+    const containerChildren: Phaser.GameObjects.GameObject[] = [
+      shipVisualContainer,
       healthBarBg,
       healthBar,
       nameText,
@@ -420,9 +472,15 @@ export class ArenaScene extends Phaser.Scene {
       trailAccumulator: 0,
       flickerOffset: (player.id.charCodeAt(0) || 0) * 17,
       graphics,
+      shipVisualContainer,
       hullGraphics,
       flameGraphics,
+      rcsGraphics,
       shieldGraphics,
+      hitGraphics,
+      lastHealth: player.health,
+      lastShield: player.shield,
+      hitFlashUntil: 0,
       healthBar,
       nameText,
       localIndicator,
@@ -433,144 +491,65 @@ export class ArenaScene extends Phaser.Scene {
     return ship;
   }
 
-  /**
-   * Procedurally draws a sleek, detailed sci-fi space interceptor with
-   * swept wings, armor plating, dual blaster cannons, cockpit canopy with
-   * reflection gleam, engine nacelles, and navigation lights.
-   */
-  private drawDetailedShipHull(g: Phaser.GameObjects.Graphics, color: number, isLocal: boolean): void {
+  private drawSimpleShipHull(g: Phaser.GameObjects.Graphics, color: number, isLocal: boolean): void {
     g.clear();
 
-    // ── 1. Base Armored Hull Outline & Polygon ────────────────────────────────
-    // Faceted space interceptor silhouette facing +X (nose at +24, wingspan ±21.5)
+    // ── 1. Clean Sleek Aerodynamic Dart Silhouette ───────────────────────────
     const hullPoints: Phaser.Types.Math.Vector2Like[] = [
-      { x: 24, y: 0 },       // Nose cone tip
-      { x: 15, y: -4.5 },    // Forward chine slope
-      { x: 7, y: -7 },       // Leading strake root
-      { x: -5, y: -20 },     // Swept wing leading edge
-      { x: 4, y: -20 },      // Left wingtip weapon launcher rail
-      { x: 4, y: -21.5 },    // Left wingtip outer corner
-      { x: -8, y: -21.5 },   // Left wingtip trailing edge
-      { x: -11, y: -16 },    // Left wing root notch
-      { x: -9, y: -11 },     // Left wing trailing inner notch
-      { x: -16, y: -11 },    // Left engine nacelle outer corner
-      { x: -16, y: -4 },     // Left engine exhaust nozzle port
-      { x: -12, y: 0 },      // Rear center keel notch
-      { x: -16, y: 4 },      // Right engine exhaust nozzle port
-      { x: -16, y: 11 },     // Right engine nacelle outer corner
-      { x: -9, y: 11 },      // Right wing trailing inner notch
-      { x: -11, y: 16 },     // Right wing root notch
-      { x: -8, y: 21.5 },    // Right wingtip trailing edge
-      { x: 4, y: 21.5 },     // Right wingtip outer corner
-      { x: 4, y: 20 },       // Right wingtip weapon launcher rail
-      { x: -5, y: 20 },      // Swept wing leading edge
-      { x: 7, y: 7 },        // Leading strake root
-      { x: 15, y: 4.5 },     // Forward chine slope
+      { x: 22, y: 0 },      // Sharp forward nose
+      { x: -12, y: -16 },   // Left wingtip
+      { x: -8, y: -8 },     // Left wing root indent
+      { x: -15, y: -7 },    // Left engine exhaust nozzle
+      { x: -11, y: 0 },     // Center engine keel notch
+      { x: -15, y: 7 },     // Right engine exhaust nozzle
+      { x: -8, y: 8 },      // Right wing root indent
+      { x: -12, y: 16 },    // Right wingtip
     ];
 
-    // Dark armored hull base fill
-    g.fillStyle(0x0a0f24, 0.95);
+    // Solid dark spaceship composite hull fill
+    g.fillStyle(0x080e1e, 0.96);
     g.fillPoints(hullPoints, true);
 
-    // ── 2. Wing Armor Plating Panels (Dual Tone) ──────────────────────────────
-    // Upper wing panel plate
-    g.fillStyle(0x131d3b, 0.85);
-    g.fillPoints([
-      { x: 6, y: -6.5 },
-      { x: -4, y: -18 },
-      { x: -8, y: -15 },
-      { x: -7, y: -9 },
-    ], true);
+    // ── 2. Dual Side Laser Blaster Cannons ───────────────────────────────────
+    // Left blaster cannon rail on left wing
+    g.lineStyle(2, 0x475569, 1);
+    g.lineBetween(-2, -13, 9, -13);
+    g.fillStyle(color, 0.9);
+    g.fillCircle(10, -13, 2.5);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(10.5, -13, 1.3);
 
-    // Lower wing panel plate
-    g.fillPoints([
-      { x: 6, y: 6.5 },
-      { x: -4, y: 18 },
-      { x: -8, y: 15 },
-      { x: -7, y: 9 },
-    ], true);
+    // Right blaster cannon rail on right wing
+    g.lineStyle(2, 0x475569, 1);
+    g.lineBetween(-2, 13, 9, 13);
+    g.fillStyle(color, 0.9);
+    g.fillCircle(10, 13, 2.5);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(10.5, 13, 1.3);
 
-    // Center fuselage armored spine plate
-    g.fillStyle(0x10172e, 0.9);
-    g.fillPoints([
-      { x: 15, y: 0 },
-      { x: 5, y: -4.5 },
-      { x: -5, y: -4.5 },
-      { x: -11, y: 0 },
-      { x: -5, y: 4.5 },
-      { x: 5, y: 4.5 },
-    ], true);
-
-    // ── 3. Engine Nacelles & Exhaust Ports ─────────────────────────────────────
-    // Left engine nacelle body
-    g.fillStyle(0x172554, 0.9);
-    g.fillRect(-16, -11, 7, 7);
-    // Right engine nacelle body
-    g.fillRect(-16, 4, 7, 7);
-
-    // Engine intake/nozzle rings (metallic rims)
-    g.lineStyle(1.5, 0x334155, 1);
-    g.strokeRect(-16, -11, 7, 7);
-    g.strokeRect(-16, 4, 7, 7);
-
-    // Engine exhaust nozzle ports (inner glowing rim)
-    g.lineStyle(2, color, 0.9);
-    g.lineBetween(-16, -10.5, -16, -4.5);
-    g.lineBetween(-16, 4.5, -16, 10.5);
-
-    // ── 4. Main Hull Neon Vector Stroke & Panel Creases ───────────────────────
-    // Vibrant neon outer perimeter
+    // ── 3. Crisp Neon Hull Vector Stroke ─────────────────────────────────────
     g.lineStyle(isLocal ? 2.5 : 2, color, isLocal ? 1 : 0.9);
     g.strokePoints(hullPoints, true);
 
-    // Subtle neon inner panel accent lines
-    g.lineStyle(1, color, 0.45);
-    g.lineBetween(6, -6.5, -4, -18);
-    g.lineBetween(6, 6.5, -4, 18);
-    g.lineBetween(23, 0, 14, 0);
-    g.lineBetween(-3, 0, -11, 0);
+    // Subtle centerline keel spine
+    g.lineStyle(1, color, 0.4);
+    g.lineBetween(19, 0, 7, 0);
 
-    // ── 5. Wingtip Laser Blaster Cannons ───────────────────────────────────────
-    // Left cannon barrel
-    g.lineStyle(2, 0x64748b, 1);
-    g.lineBetween(-4, -20.5, 6, -20.5);
-    // Right cannon barrel
-    g.lineBetween(-4, 20.5, 6, 20.5);
-
-    // Glowing energy tips on the gun muzzles
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(6.5, -20.5, 1.8);
-    g.fillCircle(6.5, 20.5, 1.8);
-    g.fillStyle(color, 0.85);
-    g.fillCircle(6.5, -20.5, 3);
-    g.fillCircle(6.5, 20.5, 3);
-
-    // ── 6. Cockpit Canopy (Fighter Jet Diamond Visor) ──────────────────────────
-    const canopyPoints: Phaser.Types.Math.Vector2Like[] = [
-      { x: 13, y: 0 },
-      { x: 2.5, y: -4 },
-      { x: -3, y: 0 },
-      { x: 2.5, y: 4 },
+    // ── 4. Sleek Cockpit Canopy (Translucent Cyan Visor) ─────────────────────
+    const canopy: Phaser.Types.Math.Vector2Like[] = [
+      { x: 10, y: 0 },
+      { x: 0, y: -3.5 },
+      { x: -4, y: 0 },
+      { x: 0, y: 3.5 },
     ];
-    // Translucent electric neon visor glass
-    g.fillStyle(0x00f5ff, 0.75);
-    g.fillPoints(canopyPoints, true);
+    g.fillStyle(0x06b6d4, 0.85);
+    g.fillPoints(canopy, true);
+    g.lineStyle(1.2, 0xe0f2fe, 0.95);
+    g.strokePoints(canopy, true);
 
-    // Cockpit neon frame
-    g.lineStyle(1.5, 0xe0f2fe, 0.95);
-    g.strokePoints(canopyPoints, true);
-
-    // Specular glass glare highlight streak
+    // Specular canopy reflection streak
     g.lineStyle(1, 0xffffff, 0.9);
-    g.lineBetween(10, -1.2, 1, -3);
-
-    // ── 7. Wingtip Navigation Beacons ─────────────────────────────────────────
-    // Port wingtip: Ruby Red LED
-    g.fillStyle(0xf43f5e, 0.9);
-    g.fillCircle(-6, -21.5, 1.8);
-    // Starboard wingtip: Emerald Green LED
-    g.fillStyle(0x10b981, 0.9);
-    g.fillCircle(-6, 21.5, 1.8);
+    g.lineBetween(7, -0.8, 1, -2.5);
   }
 
   private updateShipVisuals(ship: InterpolatedShip, player: PlayerState): void {
@@ -578,6 +557,17 @@ export class ArenaScene extends Phaser.Scene {
     ship.alive = player.alive;
     ship.hasShield = player.shield > 0;
     ship.spawnProtectedUntil = player.spawnProtectedUntil;
+
+    // Detect incoming damage to trigger red hit flash and cockpit camera shake
+    if (player.health < ship.lastHealth || player.shield < ship.lastShield) {
+      ship.hitFlashUntil = Date.now() + 180;
+      if (ship.id === this.localPlayerId) {
+        this.cameras.main.shake(120, 0.012);
+        soundManager.playHit();
+      }
+    }
+    ship.lastHealth = player.health;
+    ship.lastShield = player.shield;
 
     // Update health bar
     const healthPercent = player.health / player.maxHealth;
@@ -593,15 +583,39 @@ export class ArenaScene extends Phaser.Scene {
     if (!player.alive) {
       ship.graphics.setAlpha(0.25);
       ship.flameGraphics.clear();
+      ship.rcsGraphics.clear();
+      ship.hitGraphics.clear();
     } else {
       ship.graphics.setAlpha(1.0);
     }
   }
 
-  // ── Dynamic Thrusters, Flames, Shields & Trails ───────────────────────────
+  // ── Dynamic Thrusters, RCS Jets, Flames & Trails ──────────────────────────
+
+  private readonly shipHullOutlinePoints: Phaser.Types.Math.Vector2Like[] = [
+    { x: 22, y: 0 },
+    { x: -12, y: -16 },
+    { x: -8, y: -8 },
+    { x: -15, y: -7 },
+    { x: -11, y: 0 },
+    { x: -15, y: 7 },
+    { x: -8, y: 8 },
+    { x: -12, y: 16 },
+  ];
 
   private updateShipEffects(time: number, delta: number): void {
+    const now = Date.now();
     for (const ship of this.ships.values()) {
+      // ── Red Hit Damage Flash ──────────────────────────────────────────────
+      ship.hitGraphics.clear();
+      if (now < ship.hitFlashUntil && ship.alive) {
+        // Vibrant red flash overlay over the entire ship silhouette
+        ship.hitGraphics.fillStyle(0xef4444, 0.7);
+        ship.hitGraphics.fillPoints(this.shipHullOutlinePoints, true);
+        ship.hitGraphics.lineStyle(3, 0xff1e1e, 1);
+        ship.hitGraphics.strokePoints(this.shipHullOutlinePoints, true);
+      }
+
       this.updateShipFlames(ship, time);
       this.updateShipShield(ship, time);
 
@@ -614,84 +628,93 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * Renders twin dynamic rocket exhaust plumes extending backwards from
-   * the engine nozzles (-16, -7.5) and (-16, +7.5), complete with high-frequency
-   * flicker, speed scaling, and white-hot inner core plasma.
-   */
   private updateShipFlames(ship: InterpolatedShip, time: number): void {
     const fg = ship.flameGraphics;
+    const rcs = ship.rcsGraphics;
     fg.clear();
+    rcs.clear();
 
     if (!ship.alive) return;
 
     const speed = ship.speed;
     const throttle = Math.min(1, speed / SHIP_MAX_SPEED);
+    const isLocal = ship.id === this.localPlayerId;
+    const isBoosting = isLocal && this.inputManager.isBoosting();
 
-    if (speed > 12) {
-      // Active thrusting: twin elongated rocket exhaust flames
-      const baseLen = 10 + throttle * 22;
+    if (speed > 12 || isBoosting) {
+      const baseLen = isBoosting ? 26 + throttle * 30 : 10 + throttle * 22;
       const flicker = Math.sin(time * 0.05 + ship.flickerOffset) * 3 + (Math.random() - 0.5) * 4;
       const flameLen = Math.max(6, baseLen + flicker);
-      const flameHalfWidth = 3.2;
+      const flameHalfWidth = isBoosting ? 4.2 : 3.0;
 
-      // Outer plasma flame (ship neon tint)
-      fg.fillStyle(ship.color, 0.85);
-      // Left outer flame
+      // Outer plasma flame (bright electric cyan when boosting, else ship neon tint)
+      fg.fillStyle(isBoosting ? 0x22d3ee : ship.color, 0.9);
       fg.fillTriangle(
-        -16, -7.5 - flameHalfWidth,
-        -16, -7.5 + flameHalfWidth,
-        -16 - flameLen, -7.5,
+        -15, -7 - flameHalfWidth,
+        -15, -7 + flameHalfWidth,
+        -15 - flameLen, -7,
       );
-      // Right outer flame
       fg.fillTriangle(
-        -16, 7.5 - flameHalfWidth,
-        -16, 7.5 + flameHalfWidth,
-        -16 - flameLen, 7.5,
+        -15, 7 - flameHalfWidth,
+        -15, 7 + flameHalfWidth,
+        -15 - flameLen, 7,
       );
 
       // Inner core flame (bright white-hot plasma)
-      const coreLen = flameLen * 0.55;
-      const coreHalfWidth = 1.6;
-      fg.fillStyle(0xffffff, 0.95);
-      // Left inner core
+      const coreLen = flameLen * 0.6;
+      const coreHalfWidth = isBoosting ? 2.2 : 1.5;
+      fg.fillStyle(0xffffff, 0.98);
       fg.fillTriangle(
-        -16, -7.5 - coreHalfWidth,
-        -16, -7.5 + coreHalfWidth,
-        -16 - coreLen, -7.5,
+        -15, -7 - coreHalfWidth,
+        -15, -7 + coreHalfWidth,
+        -15 - coreLen, -7,
       );
-      // Right inner core
       fg.fillTriangle(
-        -16, 7.5 - coreHalfWidth,
-        -16, 7.5 + coreHalfWidth,
-        -16 - coreLen, 7.5,
+        -15, 7 - coreHalfWidth,
+        -15, 7 + coreHalfWidth,
+        -15 - coreLen, 7,
       );
     } else {
       // Idle engine hum: subtle glowing pilot flames
       const idleLen = 4 + Math.sin(time * 0.008 + ship.flickerOffset) * 1.5;
       const idleAlpha = 0.45 + Math.sin(time * 0.006) * 0.2;
       fg.fillStyle(ship.color, idleAlpha);
-      fg.fillTriangle(-16, -9.5, -16, -5.5, -16 - idleLen, -7.5);
-      fg.fillTriangle(-16, 5.5, -16, 9.5, -16 - idleLen, 7.5);
-      // Tiny white center
+      fg.fillTriangle(-15, -9, -15, -5, -15 - idleLen, -7);
+      fg.fillTriangle(-15, 5, -15, 9, -15 - idleLen, 7);
       fg.fillStyle(0xffffff, idleAlpha * 0.8);
-      fg.fillTriangle(-16, -8.5, -16, -6.5, -16 - idleLen * 0.5, -7.5);
-      fg.fillTriangle(-16, 6.5, -16, 8.5, -16 - idleLen * 0.5, 7.5);
+      fg.fillTriangle(-15, -8, -15, -6, -15 - idleLen * 0.5, -7);
+      fg.fillTriangle(-15, 6, -15, 8, -15 - idleLen * 0.5, 7);
+    }
+
+    // ── Space Physics RCS Steering Thrusters ────────────────────────────────
+    // If local player is braking or strafing, show cold-gas RCS thruster jets
+    if (isLocal) {
+      const curInput = this.inputManager.getCurrentInput();
+      if (curInput.down) {
+        // Forward retro-braking thrusters at the nose (+X direction)
+        rcs.fillStyle(0x38bdf8, 0.85);
+        rcs.fillTriangle(20, -5, 20, -3, 26 + Math.random() * 4, -4);
+        rcs.fillTriangle(20, 3, 20, 5, 26 + Math.random() * 4, 4);
+      }
+      if (curInput.left) {
+        // Lateral RCS thruster on starboard wingtip
+        rcs.fillStyle(0x38bdf8, 0.8);
+        rcs.fillTriangle(-5, 21, -3, 21, -4, 27 + Math.random() * 4);
+      }
+      if (curInput.right) {
+        // Lateral RCS thruster on port wingtip
+        rcs.fillStyle(0x38bdf8, 0.8);
+        rcs.fillTriangle(-5, -21, -3, -21, -4, -27 - Math.random() * 4);
+      }
     }
   }
 
-  /**
-   * Emits glowing neon particles into world space at both engine nozzles
-   * to create authentic lingering plasma thruster wake trails (trailers)
-   * that follow the ship's curved flight path.
-   */
   private updateShipTrails(ship: InterpolatedShip, delta: number): void {
     if (!ship.alive) return;
 
     const speed = ship.speed;
     if (speed <= 12) return;
 
-    // Calculate world coordinates of twin exhaust nozzles (-16, -7.5) and (-16, +7.5)
     const cos = Math.cos(ship.rotation);
     const sin = Math.sin(ship.rotation);
 
@@ -702,17 +725,13 @@ export class ArenaScene extends Phaser.Scene {
     const rightY = ship.y - sin * 16 + cos * 7.5;
 
     ship.trailAccumulator += delta;
-    // Faster speed = higher trail frequency so there are no gaps in the trail
     const emitInterval = Math.max(16, 36 - (speed / SHIP_MAX_SPEED) * 20);
 
     while (ship.trailAccumulator >= emitInterval) {
       ship.trailAccumulator -= emitInterval;
-
-      // Emit glowing plasma trailer particles from both nozzles into world space
       ship.trailEmitter.emitParticleAt(leftX, leftY, 1);
       ship.trailEmitter.emitParticleAt(rightX, rightY, 1);
 
-      // High-speed energetic exhaust sparks
       if (speed > 160 && Math.random() < 0.6) {
         ship.sparkEmitter.emitParticleAt(leftX, leftY, 1);
         ship.sparkEmitter.emitParticleAt(rightX, rightY, 1);
@@ -720,9 +739,6 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * Animates a rotating, pulsing energy shield forcefield bubble.
-   */
   private updateShipShield(ship: InterpolatedShip, time: number): void {
     const sg = ship.shieldGraphics;
     sg.clear();
@@ -739,15 +755,12 @@ export class ArenaScene extends Phaser.Scene {
     const shieldColor = isSpawnProtected ? 0xfde047 : 0x38bdf8;
     const pulseAlpha = 0.5 + 0.3 * Math.sin(time * 0.006 + ship.flickerOffset);
 
-    // Outer shield perimeter ring
     sg.lineStyle(2, shieldColor, pulseAlpha);
     sg.strokeCircle(0, 0, SHIP_RADIUS * 1.35);
 
-    // Translucent shield bubble fill
     sg.fillStyle(shieldColor, 0.12);
     sg.fillCircle(0, 0, SHIP_RADIUS * 1.35);
 
-    // Three rotating high-energy shield arc segments
     const arcOffset = time * 0.002;
     sg.lineStyle(2.5, 0xffffff, pulseAlpha * 0.9);
     for (let i = 0; i < 3; i++) {
@@ -758,6 +771,7 @@ export class ArenaScene extends Phaser.Scene {
       sg.strokePath();
     }
   }
+
 
   // ── Projectile creation ───────────────────────────────────────────────────
 
@@ -790,7 +804,6 @@ export class ArenaScene extends Phaser.Scene {
   // ── Asteroid creation ─────────────────────────────────────────────────────
 
   private createAsteroid(ast: AsteroidState): InterpolatedAsteroid {
-    // Generate polygon from seed
     const points = this.generateAsteroidShape(ast.radius, ast.seed);
     const polygon = this.add.polygon(0, 0, points, 0x8b9bb4, 0.3);
     polygon.setStrokeStyle(2, 0x8b9bb4, 0.8);
@@ -846,34 +859,126 @@ export class ArenaScene extends Phaser.Scene {
     return { id: pickup.id, x: pickup.x, y: pickup.y, graphics };
   }
 
-  // ── Environment ───────────────────────────────────────────────────────────
+  // ── Environment: Multi-Layer Parallax Starfield & Space Cosmos ────────────
 
-  private createStarfield(): void {
-    // Generate starfield texture procedurally
-    const canvas = this.textures.createCanvas('starfield', 512, 512);
-    if (!canvas) return;
-    const ctx = canvas.getContext();
-    ctx.fillStyle = '#05050f';
-    ctx.fillRect(0, 0, 512, 512);
-    // Draw stars
-    for (let i = 0; i < 200; i++) {
-      const x = Math.random() * 512;
-      const y = Math.random() * 512;
-      const size = Math.random() * 1.5 + 0.5;
-      const alpha = Math.random() * 0.5 + 0.3;
-      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-      ctx.fillRect(x, y, size, size);
+  private createSpaceEnvironment(): void {
+    // ── Layer 1: Distant Deep Stars (ScrollFactor: 0.05) ─────────────────────
+    if (!this.textures.exists('starfield-far')) {
+      const canvasFar = this.textures.createCanvas('starfield-far', 1024, 1024);
+      if (canvasFar) {
+        const ctx = canvasFar.getContext();
+        // Deep pure space void
+        ctx.fillStyle = '#02040a';
+        ctx.fillRect(0, 0, 1024, 1024);
+
+        // 400 tiny pinpoint background stars
+        for (let i = 0; i < 400; i++) {
+          const x = Math.random() * 1024;
+          const y = Math.random() * 1024;
+          const sz = Math.random() * 0.7 + 0.3;
+          const a = Math.random() * 0.45 + 0.2;
+          ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+          ctx.fillRect(x, y, sz, sz);
+        }
+        canvasFar.refresh();
+      }
     }
-    canvas.refresh();
-    this.starfield = this.add.tileSprite(0, 0, ARENA_WIDTH * 2, ARENA_HEIGHT * 2, 'starfield');
-    this.starfield.setOrigin(0, 0);
-    this.starfield.setScrollFactor(0.3); // Parallax effect
+
+    // ── Layer 2: Mid-Field Stars (ScrollFactor: 0.15) ────────────────────────
+    if (!this.textures.exists('starfield-mid')) {
+      const canvasMid = this.textures.createCanvas('starfield-mid', 1024, 1024);
+      if (canvasMid) {
+        const ctx = canvasMid.getContext();
+        ctx.clearRect(0, 0, 1024, 1024);
+
+        const starColors = [
+          'rgba(255, 255, 255, 0.85)',
+          'rgba(186, 230, 253, 0.85)',
+          'rgba(165, 243, 252, 0.85)',
+          'rgba(254, 240, 138, 0.75)',
+        ];
+
+        for (let i = 0; i < 220; i++) {
+          const x = Math.random() * 1024;
+          const y = Math.random() * 1024;
+          const r = Math.random() * 0.8 + 0.6;
+          const col = starColors[i % starColors.length]!;
+
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        canvasMid.refresh();
+      }
+    }
+
+    // ── Layer 3: Near-Field Bright Stars (ScrollFactor: 0.35) ────────────────
+    if (!this.textures.exists('starfield-near')) {
+      const canvasNear = this.textures.createCanvas('starfield-near', 1024, 1024);
+      if (canvasNear) {
+        const ctx = canvasNear.getContext();
+        ctx.clearRect(0, 0, 1024, 1024);
+
+        for (let i = 0; i < 85; i++) {
+          const x = Math.random() * 1024;
+          const y = Math.random() * 1024;
+          const r = Math.random() * 1.2 + 0.9;
+
+          // Soft star aura glow
+          ctx.fillStyle = 'rgba(125, 211, 252, 0.25)';
+          ctx.beginPath();
+          ctx.arc(x, y, r * 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Bright star core
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Subtle 4-point cross diffraction glint on select bright stars
+          if (i % 12 === 0) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(x - 5, y);
+            ctx.lineTo(x + 5, y);
+            ctx.moveTo(x, y - 5);
+            ctx.lineTo(x, y + 5);
+            ctx.stroke();
+          }
+        }
+        canvasNear.refresh();
+      }
+    }
+
+    // Mount 3 TileSprites for smooth multi-layer parallax
+    this.starfieldFar = this.add.tileSprite(0, 0, ARENA_WIDTH * 2.4, ARENA_HEIGHT * 2.4, 'starfield-far');
+    this.starfieldFar.setOrigin(0, 0);
+    this.starfieldFar.setScrollFactor(0.05);
+    this.starfieldFar.setDepth(0);
+
+    this.starfieldMid = this.add.tileSprite(0, 0, ARENA_WIDTH * 2.4, ARENA_HEIGHT * 2.4, 'starfield-mid');
+    this.starfieldMid.setOrigin(0, 0);
+    this.starfieldMid.setScrollFactor(0.15);
+    this.starfieldMid.setDepth(1);
+
+    this.starfieldNear = this.add.tileSprite(0, 0, ARENA_WIDTH * 2.4, ARENA_HEIGHT * 2.4, 'starfield-near');
+    this.starfieldNear.setOrigin(0, 0);
+    this.starfieldNear.setScrollFactor(0.35);
+    this.starfieldNear.setDepth(2);
+
+    this.planetContainer = this.add.container(0, 0);
+    this.planetContainer.setDepth(2);
   }
 
   private createGrid(): void {
     this.gridGraphics = this.add.graphics();
-    this.gridGraphics.lineStyle(1, Phaser.Display.Color.HexStringToColor(NEON.grid).color, 0.3);
+    this.gridGraphics.setDepth(3);
+    this.gridGraphics.lineStyle(1, Phaser.Display.Color.HexStringToColor(NEON.grid).color, 0.35);
     const gridSize = 200;
+
     for (let x = 0; x <= ARENA_WIDTH; x += gridSize) {
       this.gridGraphics.moveTo(x, 0);
       this.gridGraphics.lineTo(x, ARENA_HEIGHT);
@@ -883,16 +988,35 @@ export class ArenaScene extends Phaser.Scene {
       this.gridGraphics.lineTo(ARENA_WIDTH, y);
     }
     this.gridGraphics.strokePath();
+
+    // Sector tactical cross markings every 400px
+    this.gridGraphics.lineStyle(1.5, 0x22d3ee, 0.4);
+    for (let x = 400; x < ARENA_WIDTH; x += 400) {
+      for (let y = 400; y < ARENA_HEIGHT; y += 400) {
+        this.gridGraphics.lineBetween(x - 8, y, x + 8, y);
+        this.gridGraphics.lineBetween(x, y - 8, x, y + 8);
+      }
+    }
   }
 
   private createBoundary(): void {
     this.boundaryGraphics = this.add.graphics();
-    this.boundaryGraphics.lineStyle(4, Phaser.Display.Color.HexStringToColor(NEON.boundary).color, 0.8);
+    this.boundaryGraphics.setDepth(4);
+    this.boundaryGraphics.lineStyle(4, Phaser.Display.Color.HexStringToColor(NEON.boundary).color, 0.85);
     this.boundaryGraphics.strokeRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+
+    // Hazard corner indicators
+    const cornerSize = 40;
+    this.boundaryGraphics.lineStyle(2, 0xf43f5e, 0.8);
+    this.boundaryGraphics.strokeRect(0, 0, cornerSize, cornerSize);
+    this.boundaryGraphics.strokeRect(ARENA_WIDTH - cornerSize, 0, cornerSize, cornerSize);
+    this.boundaryGraphics.strokeRect(0, ARENA_HEIGHT - cornerSize, cornerSize, cornerSize);
+    this.boundaryGraphics.strokeRect(ARENA_WIDTH - cornerSize, ARENA_HEIGHT - cornerSize, cornerSize, cornerSize);
   }
 
   private createSafeZone(): void {
     this.safeZoneGraphics = this.add.graphics();
+    this.safeZoneGraphics.setDepth(4);
   }
 
   private updateSafeZone(zone: SafeZoneState): void {
@@ -913,7 +1037,7 @@ export class ArenaScene extends Phaser.Scene {
 
   private createExplosion(x: number, y: number, color: number): void {
     if (this.explosionEmitter) {
-      this.explosionEmitter.emitParticleAt(x, y, 24);
+      this.explosionEmitter.emitParticleAt(x, y, 28);
     }
     // Expanding neon shockwave ring
     const ring = this.add.circle(x, y, 6);
@@ -921,27 +1045,43 @@ export class ArenaScene extends Phaser.Scene {
     ring.setDepth(18);
     this.tweens.add({
       targets: ring,
-      radius: 64,
+      radius: 68,
       alpha: 0,
       duration: 380,
       ease: 'Cubic.easeOut',
       onComplete: () => ring.destroy(),
     });
+
+    // Impactful camera shake on explosion
+    const cam = this.cameras.main;
+    const camX = cam.scrollX + cam.width / 2;
+    const camY = cam.scrollY + cam.height / 2;
+    const dist = Math.hypot(x - camX, y - camY);
+    if (dist < 1400) {
+      const intensity = Math.max(0.006, 0.024 * (1 - dist / 1400));
+      cam.shake(260, intensity);
+    }
   }
 
-  // ── Interpolation ─────────────────────────────────────────────────────────
+  // ── Interpolation & Local Prediction ──────────────────────────────────────
 
   private interpolateShips(delta: number): void {
-    const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
     for (const ship of this.ships.values()) {
-      ship.x = Phaser.Math.Linear(ship.x, ship.targetX, factor);
-      ship.y = Phaser.Math.Linear(ship.y, ship.targetY, factor);
-      ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, factor);
-      ship.graphics.setPosition(ship.x, ship.y);
-      ship.graphics.setRotation(ship.rotation);
-      // Update camera for input manager
       if (ship.id === this.localPlayerId) {
+        // Snappy local position interpolation (smooth without lag delay)
+        const localFactor = Math.min(1, delta * 0.035);
+        ship.x = Phaser.Math.Linear(ship.x, ship.targetX, localFactor);
+        ship.y = Phaser.Math.Linear(ship.y, ship.targetY, localFactor);
+        ship.graphics.setPosition(ship.x, ship.y);
+        // Note: rotation is locked to instant mouse aiming in update()
         this.inputManager.updateCamera(ship.x, ship.y, this.cameras.main.zoom);
+      } else {
+        const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
+        ship.x = Phaser.Math.Linear(ship.x, ship.targetX, factor);
+        ship.y = Phaser.Math.Linear(ship.y, ship.targetY, factor);
+        ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, factor);
+        ship.graphics.setPosition(ship.x, ship.y);
+        ship.shipVisualContainer.setRotation(ship.rotation);
       }
     }
   }
@@ -1024,15 +1164,12 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private handleLocalInput(input: PlayerInput): void {
-    // Calculate aim angle from local ship position
-    const localShip = this.localPlayerId ? this.ships.get(this.localPlayerId) : null;
-    if (localShip) {
-      const worldMouse = this.inputManager.getCurrentInput(localShip.x, localShip.y);
-      input.aimAngle = worldMouse.aimAngle;
-    }
+    input.aimAngle = this.inputManager.getFacingAngle();
     socketClient.sendInput(input);
     if (input.shooting) {
       soundManager.playLaser();
+      // Physical weapon recoil micro-shake on cockpit camera
+      this.cameras.main.shake(50, 0.002);
     }
   }
 

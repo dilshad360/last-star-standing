@@ -26,6 +26,10 @@ export interface PlayerInput {
   shooting: boolean;
   /** Monotonically increasing client sequence number for de-duplication. */
   sequence: number;
+  /** Space drift / Flight assist disengaged (Inertial Dampeners off). */
+  drift?: boolean;
+  /** Afterburner thruster boost active (Shift key held). */
+  boost?: boolean;
 }
 
 // ── Live entity state (inside GameSnapshot) ──────────────────────────────────

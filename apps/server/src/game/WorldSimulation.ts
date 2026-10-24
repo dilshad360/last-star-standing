@@ -47,10 +47,16 @@ import {
   SHIELD_ABSORB,
   SHIP_ACCELERATION,
   SHIP_ASTEROID_CONTACT_DAMAGE,
+  SHIP_BOOST_ACCEL_MULTIPLIER,
+  SHIP_BOOST_SPEED_MULTIPLIER,
   SHIP_DRAG,
+  SHIP_DRIFT_DRAG,
   SHIP_MAX_HEALTH,
   SHIP_MAX_SPEED,
   SHIP_RADIUS,
+  SHIP_RECOIL_IMPULSE,
+  SHIP_REVERSE_SPEED_FACTOR,
+  SHIP_TURN_SPEED,
   SPAWN_RING_RADIUS,
   SPAWN_SHIELD_MS,
   STORM_DAMAGE_PER_SECOND,
@@ -382,27 +388,59 @@ export class WorldSimulation implements MatchSimulation {
       }
 
       const input = ship.input;
+      const isBoosting = Boolean(input?.boost);
+      const accelMultiplier = isBoosting ? SHIP_BOOST_ACCEL_MULTIPLIER : 1;
       if (input) {
-        const ax = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-        const ay = (input.down ? 1 : 0) - (input.up ? 1 : 0);
-        if (ax !== 0 || ay !== 0) {
-          const len = Math.hypot(ax, ay);
-          ship.velocityX += (ax / len) * SHIP_ACCELERATION * dt;
-          ship.velocityY += (ay / len) * SHIP_ACCELERATION * dt;
-        }
-        if (Number.isFinite(input.aimAngle)) {
-          ship.rotation = input.aimAngle;
+        if (ship.isBot) {
+          if (Number.isFinite(input.aimAngle)) {
+            ship.rotation = input.aimAngle;
+          }
+          const ax = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+          const ay = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+          if (ax !== 0 || ay !== 0) {
+            const len = Math.hypot(ax, ay);
+            ship.velocityX += (ax / len) * (SHIP_ACCELERATION * accelMultiplier) * dt;
+            ship.velocityY += (ay / len) * (SHIP_ACCELERATION * accelMultiplier) * dt;
+          }
+        } else {
+          // Human player: A/D steers left/right, W/S fires forward/reverse thrusters
+          const turn = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+          if (turn !== 0) {
+            ship.rotation += turn * SHIP_TURN_SPEED * dt;
+          } else if (Number.isFinite(input.aimAngle)) {
+            ship.rotation = input.aimAngle;
+          }
+
+          const forward = input.up ? 1 : 0;
+          const reverse = input.down ? 1 : 0;
+          if (forward > 0) {
+            const fx = Math.cos(ship.rotation);
+            const fy = Math.sin(ship.rotation);
+            ship.velocityX += fx * (SHIP_ACCELERATION * accelMultiplier) * dt;
+            ship.velocityY += fy * (SHIP_ACCELERATION * accelMultiplier) * dt;
+          }
+          if (reverse > 0) {
+            const fx = Math.cos(ship.rotation);
+            const fy = Math.sin(ship.rotation);
+            const revAccel = SHIP_ACCELERATION * SHIP_REVERSE_SPEED_FACTOR;
+            ship.velocityX -= fx * revAccel * dt;
+            ship.velocityY -= fy * revAccel * dt;
+          }
         }
       }
 
-      // Velocity damping + speed cap (ENERGY raises the cap).
-      const dragFactor = Math.exp(-SHIP_DRAG * dt);
+      // Velocity damping + speed cap (drift mode reduces damping for Newtonian space drift).
+      const currentDrag = input?.drift ? SHIP_DRIFT_DRAG : SHIP_DRAG;
+      const dragFactor = Math.exp(-currentDrag * dt);
       ship.velocityX *= dragFactor;
       ship.velocityY *= dragFactor;
-      const maxSpeed =
+      let maxSpeed =
         ship.upgrades.ENERGY !== undefined
           ? SHIP_MAX_SPEED * ENERGY_SPEED_MULTIPLIER
           : SHIP_MAX_SPEED;
+      if (isBoosting) {
+        maxSpeed *= SHIP_BOOST_SPEED_MULTIPLIER;
+      }
       const speed = Math.hypot(ship.velocityX, ship.velocityY);
       if (speed > maxSpeed) {
         ship.velocityX = (ship.velocityX / speed) * maxSpeed;
@@ -437,28 +475,75 @@ export class WorldSimulation implements MatchSimulation {
           ? RAPID_FIRE_COOLDOWN_MS
           : FIRE_COOLDOWN_MS;
       if (this.now - ship.lastShotAt < cooldown) continue;
-      if (this.projectiles.size >= MAX_PROJECTILES) return;
+      if (this.projectiles.size >= MAX_PROJECTILES - 1) return;
       ship.lastShotAt = this.now;
 
-      const id = `proj-${++this.projectileSeq}`;
-      const nose = SHIP_RADIUS + PROJECTILE_RADIUS + 4;
-      this.projectiles.set(id, {
-        id,
+      const cos = Math.cos(ship.rotation);
+      const sin = Math.sin(ship.rotation);
+      const forwardOffset = 10;
+      const wingOffset = 13; // Distance from centerline to left/right blaster
+
+      // Left wing laser blaster
+      const id1 = `proj-${++this.projectileSeq}`;
+      const leftX = ship.x + cos * forwardOffset - sin * wingOffset;
+      const leftY = ship.y + sin * forwardOffset + cos * wingOffset;
+      this.projectiles.set(id1, {
+        id: id1,
         ownerId: ship.id,
-        x: ship.x + Math.cos(ship.rotation) * nose,
-        y: ship.y + Math.sin(ship.rotation) * nose,
-        velocityX: Math.cos(ship.rotation) * PROJECTILE_SPEED,
-        velocityY: Math.sin(ship.rotation) * PROJECTILE_SPEED,
-        damage: PROJECTILE_DAMAGE,
+        x: leftX,
+        y: leftY,
+        velocityX: cos * PROJECTILE_SPEED,
+        velocityY: sin * PROJECTILE_SPEED,
+        damage: Math.round(PROJECTILE_DAMAGE * 0.6), // 12 damage each (24 per dual salvo)
         expiresAt: this.now + PROJECTILE_LIFETIME_MS,
       });
+
+      // Right wing laser blaster
+      const id2 = `proj-${++this.projectileSeq}`;
+      const rightX = ship.x + cos * forwardOffset + sin * wingOffset;
+      const rightY = ship.y + sin * forwardOffset - cos * wingOffset;
+      this.projectiles.set(id2, {
+        id: id2,
+        ownerId: ship.id,
+        x: rightX,
+        y: rightY,
+        velocityX: cos * PROJECTILE_SPEED,
+        velocityY: sin * PROJECTILE_SPEED,
+        damage: Math.round(PROJECTILE_DAMAGE * 0.6), // 12 damage each (24 per dual salvo)
+        expiresAt: this.now + PROJECTILE_LIFETIME_MS,
+      });
+
+      // Space physics: Newton's 3rd Law reactive weapon recoil
+      ship.velocityX -= cos * SHIP_RECOIL_IMPULSE;
+      ship.velocityY -= sin * SHIP_RECOIL_IMPULSE;
     }
+  }
+
+  private distToSegmentSq(
+    px: number,
+    py: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ): number {
+    const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+    if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);
+    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * (x2 - x1);
+    const projY = y1 + t * (y2 - y1);
+    return (px - projX) * (px - projX) + (py - projY) * (py - projY);
   }
 
   private updateProjectiles(dt: number): void {
     for (const projectile of [...this.projectiles.values()]) {
+      const prevX = projectile.x;
+      const prevY = projectile.y;
       projectile.x += projectile.velocityX * dt;
       projectile.y += projectile.velocityY * dt;
+      const currX = projectile.x;
+      const currY = projectile.y;
 
       if (
         this.now >= projectile.expiresAt ||
@@ -474,15 +559,14 @@ export class WorldSimulation implements MatchSimulation {
       const isMeteor = projectile.ownerId === METEOR_OWNER_ID;
       const radius = isMeteor ? METEOR_RADIUS : PROJECTILE_RADIUS;
 
-      // Projectile ↔ ship.
+      // Projectile ↔ ship (continuous swept-segment collision detection).
       let consumed = false;
       for (const ship of this.ships.values()) {
         if (!ship.alive || ship.id === projectile.ownerId) continue;
         if (this.now < ship.spawnProtectedUntil) continue;
         const hit = SHIP_RADIUS + radius;
-        const dx = ship.x - projectile.x;
-        const dy = ship.y - projectile.y;
-        if (dx * dx + dy * dy > hit * hit) continue;
+        const dSq = this.distToSegmentSq(ship.x, ship.y, prevX, prevY, currX, currY);
+        if (dSq > hit * hit) continue;
 
         const cause: EliminationCause = isMeteor ? 'METEOR' : 'PROJECTILE';
         this.applyDamage(ship, projectile.damage, {
@@ -498,12 +582,11 @@ export class WorldSimulation implements MatchSimulation {
         continue;
       }
 
-      // Projectile ↔ asteroid (meteors smash rocks too).
+      // Projectile ↔ asteroid (continuous swept-segment collision detection).
       for (const asteroid of this.asteroids.values()) {
         const hit = asteroid.radius + radius;
-        const dx = asteroid.x - projectile.x;
-        const dy = asteroid.y - projectile.y;
-        if (dx * dx + dy * dy > hit * hit) continue;
+        const dSq = this.distToSegmentSq(asteroid.x, asteroid.y, prevX, prevY, currX, currY);
+        if (dSq > hit * hit) continue;
         asteroid.health -= projectile.damage;
         consumed = true;
         if (asteroid.health <= 0) this.destroyAsteroid(asteroid);
@@ -570,6 +653,28 @@ export class WorldSimulation implements MatchSimulation {
 
   private destroyAsteroid(asteroid: AsteroidState): void {
     this.asteroids.delete(asteroid.id);
+
+    // Space physics: large asteroid fragmentation into smaller tumbling shards
+    if (asteroid.radius >= 40 && this.asteroids.size < 28) {
+      const splitAngle = this.rng() * Math.PI * 2;
+      const fragRadius = Math.round(asteroid.radius * 0.52);
+      const fragSpeed = 35;
+      for (const dir of [1, -1]) {
+        const id = `ast-frag-${++this.asteroidSeq}`;
+        this.asteroids.set(id, {
+          id,
+          x: asteroid.x + Math.cos(splitAngle) * (fragRadius * dir),
+          y: asteroid.y + Math.sin(splitAngle) * (fragRadius * dir),
+          radius: fragRadius,
+          health: 20,
+          maxHealth: 20,
+          velocityX: asteroid.velocityX + Math.cos(splitAngle + (dir * Math.PI) / 2) * fragSpeed,
+          velocityY: asteroid.velocityY + Math.sin(splitAngle + (dir * Math.PI) / 2) * fragSpeed,
+          seed: Math.floor(this.rng() * 10000),
+        });
+      }
+    }
+
     if (this.rng() < ASTEROID_PICKUP_DROP_CHANCE) {
       const type =
         UPGRADE_TYPES[Math.floor(this.rng() * UPGRADE_TYPES.length)]!;

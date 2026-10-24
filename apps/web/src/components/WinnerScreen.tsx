@@ -1,6 +1,7 @@
 import React from 'react';
 import type { MatchResult } from '@lss/shared';
 import { SHIP_COLORS } from '@lss/shared';
+import { TrophyIcon, RotateCcwIcon, ChevronLeftIcon } from './icons.js';
 
 interface WinnerScreenProps {
   result: MatchResult;
@@ -59,24 +60,27 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
         }}
       >
         {/* Victory Spotlight Banner */}
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ marginBottom: 12 }}>
+            <TrophyIcon size={44} color={isWinner ? '#eab308' : '#38bdf8'} />
+          </div>
           <div style={{ fontSize: 13, color: '#94a3b8', letterSpacing: 3, marginBottom: 6 }}>
-            BATTLE ROYALE CONCLUDED
+            MATCH OVER
           </div>
           <h1
             className={isWinner ? 'title-glow-gold' : 'title-glow'}
             style={{
-              fontSize: 'clamp(24px, 5vw, 38px)',
+              fontSize: 'clamp(24px, 5vw, 36px)',
               margin: '0 0 8px 0',
               fontWeight: 900,
             }}
           >
             {isWinner
-              ? '👑 YOU ARE THE LAST STAR STANDING!'
-              : `🏆 ${result.winnerName ?? 'DEEP SPACE'} PREVAILED`}
+              ? 'YOU ARE THE LAST STAR STANDING!'
+              : `${result.winnerName ?? 'DEEP SPACE'} WON THE MATCH`}
           </h1>
           <div style={{ fontSize: 12, color: '#64748b', letterSpacing: 1 }}>
-            MATCH RESOLUTION: {result.endReason.replace(/_/g, ' ')} · DURATION: {formatTime(result.durationMs)}
+            Match Duration: {formatTime(result.durationMs)}
           </div>
         </div>
 
@@ -91,12 +95,12 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
             }}
           >
             <thead>
-              <tr style={{ color: '#94a3b8', borderBottom: '1px solid rgba(34, 211, 238, 0.3)' }}>
-                <th style={{ padding: '8px 12px' }}>RANK</th>
-                <th style={{ padding: '8px 12px' }}>PILOT</th>
-                <th style={{ padding: '8px 12px', textAlign: 'center' }}>KILLS</th>
-                <th style={{ padding: '8px 12px', textAlign: 'center' }}>DAMAGE</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right' }}>SURVIVAL</th>
+              <tr style={{ color: '#94a3b8', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <th style={{ padding: '8px 12px' }}>Rank</th>
+                <th style={{ padding: '8px 12px' }}>Player</th>
+                <th style={{ padding: '8px 12px', textAlign: 'center' }}>Kills</th>
+                <th style={{ padding: '8px 12px', textAlign: 'center' }}>Damage</th>
+                <th style={{ padding: '8px 12px', textAlign: 'right' }}>Survived</th>
               </tr>
             </thead>
             <tbody>
@@ -104,21 +108,18 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
                 const isMe = s.playerId === localPlayerId;
                 const colorHex = SHIP_COLORS[s.colorIndex % SHIP_COLORS.length] ?? '#22d3ee';
 
-                let medal = `#${s.placement}`;
-                if (s.placement === 1) medal = '🥇 #1';
-                else if (s.placement === 2) medal = '🥈 #2';
-                else if (s.placement === 3) medal = '🥉 #3';
-
                 return (
                   <tr
                     key={s.playerId}
                     style={{
                       borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                      background: isMe ? 'rgba(34, 211, 238, 0.12)' : 'transparent',
-                      color: isMe ? '#22d3ee' : '#f1f5f9',
+                      background: isMe ? 'rgba(56, 189, 248, 0.12)' : 'transparent',
+                      color: isMe ? '#38bdf8' : '#f1f5f9',
                     }}
                   >
-                    <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>{medal}</td>
+                    <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>
+                      #{s.placement}
+                    </td>
                     <td style={{ padding: '10px 12px' }}>
                       <span
                         style={{
@@ -131,10 +132,10 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
                         }}
                       />
                       <span style={{ fontWeight: isMe ? 'bold' : 'normal' }}>
-                        {s.displayName} {isMe && '(YOU)'}
+                        {s.displayName} {isMe && '(You)'}
                       </span>
                       {s.isBot && (
-                        <span style={{ fontSize: 10, color: '#64748b', marginLeft: 6 }}>[BOT]</span>
+                        <span style={{ fontSize: 10, color: '#64748b', marginLeft: 6 }}>[Bot]</span>
                       )}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 'bold' }}>
@@ -157,17 +158,19 @@ export const WinnerScreen: React.FC<WinnerScreenProps> = ({
         <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             onClick={onPlayAgain}
-            className="btn-neon-cyan"
-            style={{ padding: '12px 32px', fontSize: 15, letterSpacing: 1 }}
+            className="btn-neon-orange"
+            style={{ padding: '12px 32px', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}
           >
-            {isHost ? '⚡ PLAY AGAIN (REMATCH)' : 'RETURN TO LOBBY'}
+            <RotateCcwIcon size={16} />
+            {isHost ? 'Play Again' : 'Return to Lobby'}
           </button>
           <button
             onClick={onReturnToLobby}
             className="btn-neon-outline"
-            style={{ padding: '12px 24px', fontSize: 14 }}
+            style={{ padding: '12px 24px', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}
           >
-            MAIN MENU
+            <ChevronLeftIcon size={16} />
+            Main Menu
           </button>
         </div>
       </div>

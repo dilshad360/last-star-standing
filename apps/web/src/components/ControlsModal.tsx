@@ -1,4 +1,5 @@
 import React from 'react';
+import { CompassIcon, SpeedIcon, ZapIcon, Volume2Icon, CheckIcon } from './icons.js';
 
 interface ControlsModalProps {
   isOpen: boolean;
@@ -13,8 +14,8 @@ export const ControlsModal: React.FC<ControlsModalProps> = ({ isOpen, onClose })
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(5, 5, 15, 0.85)',
-        backdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(3, 5, 14, 0.88)',
+        backdropFilter: 'blur(10px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -24,7 +25,7 @@ export const ControlsModal: React.FC<ControlsModalProps> = ({ isOpen, onClose })
       onClick={onClose}
     >
       <div
-        className="glass-panel-glow"
+        className="cockpit-panel-glow"
         style={{
           maxWidth: 520,
           width: '100%',
@@ -34,10 +35,13 @@ export const ControlsModal: React.FC<ControlsModalProps> = ({ isOpen, onClose })
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 18, color: '#22d3ee', letterSpacing: 2 }}>
-            TACTICAL FLIGHT CONTROLS
-          </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 2, fontWeight: 'bold' }}>PILOT GUIDE</div>
+            <h2 style={{ margin: '2px 0 0 0', fontSize: 20, color: '#f8fafc', fontWeight: 800 }}>
+              How to Play
+            </h2>
+          </div>
           <button
             onClick={onClose}
             className="btn-neon-outline"
@@ -47,61 +51,74 @@ export const ControlsModal: React.FC<ControlsModalProps> = ({ isOpen, onClose })
           </button>
         </div>
 
-        {/* Desktop Controls */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold', marginBottom: 8, letterSpacing: 1 }}>
-            DESKTOP / LAPTOP
+        {/* Keyboard Controls */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 'bold', marginBottom: 10, letterSpacing: 1 }}>
+            KEYBOARD CONTROLS
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px 12px', fontSize: 13 }}>
-            <span style={{ color: '#22d3ee' }}>W / Up Arrow</span>
-            <span>Main Thruster Acceleration</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <CompassIcon size={16} color="#38bdf8" /> A / D
+              </span>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Turn Ship (Left / Right)</span>
+            </div>
 
-            <span style={{ color: '#22d3ee' }}>A / D (or ◀ / ▶)</span>
-            <span>Lateral Strafe Maneuver</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <SpeedIcon size={16} color="#22c55e" /> W
+              </span>
+              <span style={{ color: '#22c55e', fontWeight: 600 }}>Main Thruster (Forward)</span>
+            </div>
 
-            <span style={{ color: '#22d3ee' }}>S / Down Arrow</span>
-            <span>Reverse Thrusters / Deceleration</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <SpeedIcon size={16} color="#f97316" /> S
+              </span>
+              <span style={{ color: '#f97316', fontWeight: 600 }}>Reverse Thruster (Brake)</span>
+            </div>
 
-            <span style={{ color: '#22d3ee' }}>Mouse Movement</span>
-            <span>Direct World-Space Ship Aiming</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <ZapIcon size={16} color="#38bdf8" /> Spacebar
+              </span>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Shoot Dual Lasers</span>
+            </div>
 
-            <span style={{ color: '#22d3ee' }}>Left Click / Space</span>
-            <span>Fire Plasma Blaster Cannons</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <ZapIcon size={16} color="#eab308" /> Shift (Hold)
+              </span>
+              <span style={{ color: '#eab308', fontWeight: 600 }}>Boost Speed</span>
+            </div>
 
-            <span style={{ color: '#22d3ee' }}>M Key</span>
-            <span>Toggle Procedural Audio Mute</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: 4, alignItems: 'center' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f8fafc' }}>
+                <Volume2Icon size={16} color="#94a3b8" /> M Key
+              </span>
+              <span style={{ color: '#94a3b8' }}>Mute / Unmute Sound</span>
+            </div>
           </div>
         </div>
 
-        {/* Mobile Controls */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 'bold', marginBottom: 8, letterSpacing: 1 }}>
-            MOBILE / TOUCHSCREEN
+        {/* Tactical Rules */}
+        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: 14, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+          <div style={{ color: '#f97316', fontWeight: 'bold', marginBottom: 4 }}>
+            GAMEPLAY TIPS
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px 12px', fontSize: 13 }}>
-            <span style={{ color: '#f472b6' }}>Left Screen Half</span>
-            <span>Virtual Directional Joystick</span>
-
-            <span style={{ color: '#f472b6' }}>Right Screen Half</span>
-            <span>Touch to Fire Laser Blasters</span>
-          </div>
+          • <strong>Dual Lasers:</strong> Fire straight ahead from your left and right wings.<br />
+          • <strong>Safe Zone:</strong> Stay inside the safe zone ring. Taking storm damage outside drains your health fast.<br />
+          • <strong>Power-ups:</strong> Shoot asteroids to uncover Shields, Rapid Fire, Repair, and Speed boosts.<br />
+          • <strong>Last One Standing Wins:</strong> Survive against all opponents to win the match.
         </div>
 
-        {/* Tactical Tips */}
-        <div style={{ borderTop: '1px solid rgba(34, 211, 238, 0.2)', paddingTop: 14, fontSize: 12, color: '#94a3b8' }}>
-          <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: 4 }}>BATTLE ROYALE PROTOCOLS:</div>
-          • Shatter floating asteroids to collect Shields, Rapid Fire, and Repairs.<br />
-          • Stay within the cyan Safe-Zone perimeter ring — storm damage accelerates rapidly outside.<br />
-          • Beware Cosmic Anomalies (Meteor Showers & Solar Surges) announced on your HUD!
-        </div>
-
-        <div style={{ marginTop: 24, textAlign: 'center' }}>
+        <div style={{ marginTop: 20, textAlign: 'center' }}>
           <button
             onClick={onClose}
-            className="btn-neon-cyan"
-            style={{ padding: '10px 32px', fontSize: 14 }}
+            className="btn-neon-orange"
+            style={{ width: '100%', padding: '10px 20px', fontSize: 14 }}
           >
-            DISMISS
+            <CheckIcon size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 6 }} /> Got It
           </button>
         </div>
       </div>

@@ -17,7 +17,13 @@ export const SHIP_MAX_HEALTH = 100;
 export const SHIP_MAX_SPEED = 320;
 export const SHIP_ACCELERATION = 900;
 export const SHIP_DRAG = 2.2;
+export const SHIP_DRIFT_DRAG = 0.4;
+export const SHIP_BOOST_SPEED_MULTIPLIER = 1.45;
+export const SHIP_BOOST_ACCEL_MULTIPLIER = 1.5;
+export const SHIP_RECOIL_IMPULSE = 24;
 export const SHIP_ASTEROID_CONTACT_DAMAGE = 10;
+export const SHIP_TURN_SPEED = 4.2;
+export const SHIP_REVERSE_SPEED_FACTOR = 0.55;
 export const SPAWN_SHIELD_MS = 2500;
 export const SPAWN_RING_RADIUS = 750;
 

@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { ROOM_CODE_LENGTH } from '@lss/shared';
 import { ControlsModal } from './ControlsModal.js';
+import {
+  HelpCircleIcon,
+  Volume2Icon,
+  VolumeXIcon,
+  PlayIcon,
+  UserPlusIcon,
+  BotIcon,
+  UsersIcon,
+} from './icons.js';
 
 interface LandingScreenProps {
   displayName: string;
@@ -49,84 +58,97 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'radial-gradient(ellipse at center, #0c122c 0%, #05050f 100%)',
+        background: 'radial-gradient(ellipse at center, #09122c 0%, #03050e 100%)',
         padding: 16,
         zIndex: 20,
       }}
     >
+      {/* Cockpit Canopy Frame & Brackets */}
+      <div className="cockpit-visor-frame" />
+      <div className="cockpit-bracket-tl" />
+      <div className="cockpit-bracket-tr" />
+      <div className="cockpit-bracket-bl" />
+      <div className="cockpit-bracket-br" />
+
       {/* Top action controls: Sound & Help */}
-      <div style={{ position: 'absolute', top: 20, right: 24, display: 'flex', gap: 12 }}>
+      <div style={{ position: 'absolute', top: 20, right: 24, display: 'flex', gap: 12, zIndex: 10 }}>
         <button
           onClick={() => setShowControls(true)}
           className="btn-neon-outline"
-          style={{ padding: '6px 14px', fontSize: 13 }}
+          style={{ padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
           title="View Flight Controls"
         >
-          CONTROLS [?]
+          <HelpCircleIcon size={14} />
+          How to Play
         </button>
         <button
           onClick={onToggleMute}
           className="btn-neon-outline"
-          style={{ padding: '6px 14px', fontSize: 13 }}
+          style={{ padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
         >
-          {muted ? 'AUDIO: MUTED' : 'AUDIO: ON'}
+          {muted ? <VolumeXIcon size={14} /> : <Volume2Icon size={14} />}
+          {muted ? 'Muted' : 'Sound On'}
         </button>
       </div>
 
       {/* Main Brand Logo Header */}
-      <div style={{ textAlign: 'center', marginBottom: 28 }}>
+      <div style={{ textAlign: 'center', marginBottom: 24, zIndex: 10 }}>
+        <div style={{ fontSize: 11, color: '#f97316', letterSpacing: 3, fontWeight: 'bold', marginBottom: 6 }}>
+          2D MULTIPLAYER SPACE BATTLE ROYALE
+        </div>
         <h1
           className="title-glow"
           style={{
-            fontSize: 'clamp(28px, 6vw, 48px)',
-            margin: '0 0 8px 0',
+            fontSize: 'clamp(28px, 6vw, 46px)',
+            margin: '0 0 6px 0',
             fontWeight: 900,
           }}
         >
           LAST STAR STANDING
         </h1>
-        <div style={{ fontSize: 13, color: '#94a3b8', letterSpacing: 3, textTransform: 'uppercase' }}>
-          2D Multiplayer Space Battle Royale · 25 Hz Authoritative
+        <div style={{ fontSize: 13, color: '#94a3b8' }}>
+          Steer with A/D · Accelerate with W/S · Shoot with Space · Boost with Shift
         </div>
       </div>
 
-      {/* Main Glassmorphism Interaction Card */}
+      {/* Main Interaction Card */}
       <div
-        className="glass-panel-glow"
+        className="cockpit-panel-glow"
         style={{
           width: '100%',
           maxWidth: 440,
           padding: '24px 28px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 20,
+          gap: 18,
+          zIndex: 10,
         }}
       >
         {/* Pilot Name Input */}
         <div>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 12,
-              color: '#94a3b8',
-              marginBottom: 6,
-              fontWeight: 'bold',
-              letterSpacing: 1,
-            }}
-          >
-            PILOT CALLSIGN
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <label
+              style={{
+                fontSize: 12,
+                color: '#cbd5e1',
+                fontWeight: 'bold',
+              }}
+            >
+              Player Name
+            </label>
+            <span style={{ fontSize: 11, color: '#f97316' }}>Ready to Launch</span>
+          </div>
           <input
             type="text"
             value={displayName}
             onChange={(e) => onDisplayNameChange(e.target.value)}
-            placeholder="e.g. Maverick"
+            placeholder="e.g. StarPilot"
             maxLength={16}
             disabled={loading}
             style={{
               width: '100%',
-              background: '#090d1f',
-              border: '1px solid rgba(34, 211, 238, 0.4)',
+              background: '#060a1a',
+              border: '1px solid rgba(249, 115, 22, 0.4)',
               borderRadius: 4,
               color: '#f8fafc',
               fontSize: 16,
@@ -134,7 +156,8 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               padding: '10px 14px',
               outline: 'none',
               textAlign: 'center',
-              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.5)',
+              letterSpacing: 1,
+              boxShadow: 'inset 0 2px 6px rgba(0, 0, 0, 0.6)',
             }}
           />
         </div>
@@ -144,30 +167,30 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('quick')}
-            className={activeTab === 'quick' ? 'btn-neon-cyan' : 'btn-neon-outline'}
-            style={{ padding: '8px 12px', fontSize: 13 }}
+            className={activeTab === 'quick' ? 'btn-neon-orange' : 'btn-neon-outline'}
+            style={{ padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
           >
-            QUICK PLAY
+            <BotIcon size={14} /> Play vs Bots
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('custom')}
-            className={activeTab === 'custom' ? 'btn-neon-cyan' : 'btn-neon-outline'}
-            style={{ padding: '8px 12px', fontSize: 13 }}
+            className={activeTab === 'custom' ? 'btn-neon-orange' : 'btn-neon-outline'}
+            style={{ padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
           >
-            CUSTOM ROOM
+            <UsersIcon size={14} /> Custom Room
           </button>
         </div>
 
         {/* Quick Play Tab */}
         {activeTab === 'quick' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, textAlign: 'center' }}>
-              Jump straight into a combat arena against autonomous AI bot pilots and live human contenders.
+              Jump straight into battle against intelligent AI pilots.
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-              <span style={{ color: '#cbd5e1' }}>AI Bot Pilots:</span>
+              <span style={{ color: '#cbd5e1' }}>Number of AI Bots:</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button
                   type="button"
@@ -177,7 +200,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 >
                   -
                 </button>
-                <span style={{ color: '#22d3ee', fontWeight: 'bold', width: 20, textAlign: 'center' }}>
+                <span style={{ color: '#f97316', fontWeight: 'bold', width: 20, textAlign: 'center' }}>
                   {quickBots}
                 </span>
                 <button
@@ -194,41 +217,59 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             <button
               type="button"
               onClick={() => onQuickPlay(quickBots)}
-              disabled={loading}
-              className="btn-neon-cyan"
-              style={{ padding: '14px 20px', fontSize: 16, marginTop: 4 }}
+              disabled={loading || !displayName.trim()}
+              className="btn-neon-orange"
+              style={{
+                width: '100%',
+                padding: '14px',
+                fontSize: 16,
+                marginTop: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
             >
-              {loading ? 'CONNECTING...' : 'LAUNCH QUICK MATCH'}
+              <PlayIcon size={16} />
+              {loading ? 'Starting Match...' : 'Start Game'}
             </button>
           </div>
         )}
 
         {/* Custom Room Tab */}
         {activeTab === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <button
               type="button"
               onClick={onCreateRoom}
-              disabled={loading}
-              className="btn-neon-cyan"
-              style={{ padding: '12px 20px', fontSize: 14 }}
+              disabled={loading || !displayName.trim()}
+              className="btn-neon-orange"
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
             >
-              {loading ? 'INITIALIZING...' : 'CREATE NEW ROOM (HOST)'}
+              <UserPlusIcon size={16} />
+              {loading ? 'Creating...' : 'Create New Room'}
             </button>
 
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 12,
+                gap: 8,
                 color: '#64748b',
                 fontSize: 11,
-                letterSpacing: 2,
               }}
             >
-              <div style={{ flex: 1, height: 1, background: 'rgba(34, 211, 238, 0.2)' }} />
-              <span>OR JOIN EXISTING</span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(34, 211, 238, 0.2)' }} />
+              <div style={{ flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
+              <span>OR JOIN EXISTING ROOM</span>
+              <div style={{ flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
             </div>
 
             <form onSubmit={handleJoinSubmit} style={{ display: 'flex', gap: 8 }}>
@@ -241,41 +282,43 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 disabled={loading}
                 style={{
                   flex: 1,
-                  background: '#090d1f',
-                  border: '1px solid rgba(34, 211, 238, 0.4)',
+                  background: '#060a1a',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
                   borderRadius: 4,
                   color: '#f8fafc',
                   fontSize: 15,
-                  letterSpacing: 3,
                   fontFamily: 'inherit',
                   padding: '10px 12px',
-                  textAlign: 'center',
                   outline: 'none',
+                  textAlign: 'center',
+                  letterSpacing: 3,
                 }}
               />
               <button
                 type="submit"
-                disabled={loading || joinCode.trim().length !== ROOM_CODE_LENGTH}
+                disabled={loading || joinCode.length !== ROOM_CODE_LENGTH}
                 className="btn-neon-outline"
-                style={{ padding: '10px 16px', fontSize: 13, fontWeight: 'bold' }}
+                style={{
+                  padding: '10px 18px',
+                  fontSize: 13,
+                }}
               >
-                JOIN
+                Join
               </button>
             </form>
           </div>
         )}
 
-        {/* Status Toast */}
         {statusMessage && (
           <div
             style={{
-              fontSize: 12,
-              color: '#fbbf24',
-              textAlign: 'center',
-              padding: '6px 12px',
-              background: 'rgba(251, 191, 36, 0.1)',
+              padding: '8px 12px',
+              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
               borderRadius: 4,
-              border: '1px solid rgba(251, 191, 36, 0.3)',
+              fontSize: 12,
+              color: '#38bdf8',
+              textAlign: 'center',
             }}
           >
             {statusMessage}
@@ -283,7 +326,6 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         )}
       </div>
 
-      {/* Controls Cheat-Sheet Modal */}
       <ControlsModal isOpen={showControls} onClose={() => setShowControls(false)} />
     </div>
   );

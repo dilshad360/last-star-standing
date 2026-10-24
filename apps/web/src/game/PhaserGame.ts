@@ -32,8 +32,13 @@ export class PhaserGame {
     // Pass local player id once the scene boots
     this.game.events.once(Phaser.Core.Events.READY, () => {
       const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
-      scene?.scene.restart({ localPlayerId });
+      scene?.setLocalPlayerId(localPlayerId ?? null);
     });
+  }
+
+  setLocalPlayerId(id: string | null): void {
+    const scene = this.game?.scene.getScene('ArenaScene') as ArenaScene | undefined;
+    scene?.setLocalPlayerId(id);
   }
 
   unmount(): void {

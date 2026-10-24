@@ -179,9 +179,9 @@ describe('WorldSimulation — movement & combat', () => {
     const { sim, host } = createSim(humanRoster(2));
     const shooter = ship(sim, 'human-0');
     host.inputs.set('human-0', input({ shooting: true, aimAngle: 0 }));
-    sim.step(); // first shot fires immediately
+    sim.step(); // first shot fires immediately (dual wing lasers)
     const afterFirst = sim.projectiles.size;
-    expect(afterFirst).toBe(1);
+    expect(afterFirst).toBe(2);
 
     let shots = afterFirst;
     const ticksPerSecond = Math.round(1000 / TICK_INTERVAL_MS);
@@ -189,9 +189,9 @@ describe('WorldSimulation — movement & combat', () => {
       sim.step();
       shots = Math.max(shots, sim.projectiles.size);
     }
-    // 280 ms cooldown → at most ~4 shots per second.
+    // 280 ms cooldown → at most ~4 volleys (8 lasers) per second.
     expect(shooter.lastShotAt).toBeGreaterThan(START_TIME);
-    expect(sim.projectiles.size).toBeLessThanOrEqual(5);
+    expect(sim.projectiles.size).toBeLessThanOrEqual(10);
     void shots;
   });
 
@@ -269,9 +269,10 @@ describe('WorldSimulation — movement & combat', () => {
     const { sim, host } = createSim(humanRoster(2));
     host.inputs.set('human-0', input({ shooting: true, aimAngle: 0 }));
     sim.step();
-    expect(sim.projectiles.size).toBe(1);
-    const projectile = [...sim.projectiles.values()][0]!;
-    projectile.x = -9999; // fling out of bounds
+    expect(sim.projectiles.size).toBe(2);
+    for (const projectile of sim.projectiles.values()) {
+      projectile.x = -9999; // fling out of bounds
+    }
     sim.step();
     expect(sim.projectiles.size).toBe(0);
   });

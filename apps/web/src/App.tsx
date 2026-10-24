@@ -273,6 +273,9 @@ export default function App() {
   };
 
   const handlePlayAgain = async () => {
+    setResult(null);
+    setCountdown(null);
+    setEliminatedInfo(null);
     if (isHost) {
       try {
         await socketClient.restartMatch();
@@ -280,7 +283,6 @@ export default function App() {
         setErrorToast(err instanceof Error ? err.message : String(err));
       }
     } else {
-      setResult(null);
       setScreen('lobby');
     }
   };
