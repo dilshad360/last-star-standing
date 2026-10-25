@@ -84,7 +84,7 @@ class HeadlessHost implements SimulationHost {
 
 const roster: SimulationRosterEntry[] = Array.from({ length: shipCount }, (_, i) => ({
   id: `bot-sim-${i}`,
-  displayName: `${BOT_NAMES[i % BOT_NAMES.length]} [AI]`,
+  displayName: `${BOT_NAMES[i % BOT_NAMES.length]} [BOT]`,
   isBot: true,
   colorIndex: i,
 }));

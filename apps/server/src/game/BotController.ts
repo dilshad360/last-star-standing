@@ -163,8 +163,22 @@ export class BotController {
         (Math.PI / 2) * this.orbitSign;
       moveX += Math.cos(strafeAngle) * 0.55;
       moveY += Math.sin(strafeAngle) * 0.55;
+    } else if (enemy && (!pickup || (!hurt && enemyDist < 1200))) {
+      // Hunt and pursue distant enemies — never stay idle while opponents are alive!
+      const huntWeight = isEarlyGame ? 0.9 : 1.25;
+      const steer = this.steerToward(self.x, self.y, enemy.x, enemy.y, huntWeight);
+      moveX += steer.x;
+      moveY += steer.y;
+      aimAngle = Math.atan2(enemy.y - self.y, enemy.x - self.x) + this.aimNoise;
+
+      // Take potshots at asteroids along the hunt path if ready
+      const nearAsteroid = this.nearestAsteroid(self, view.asteroids, 300);
+      if (nearAsteroid && view.now >= this.burstCooldownUntil) {
+        aimAngle = Math.atan2(nearAsteroid.y - self.y, nearAsteroid.x - self.x);
+        shooting = true;
+      }
     } else if (!pickup) {
-      // No threats or loot nearby: farm the closest asteroid for drops.
+      // No enemies or loot nearby: farm the closest asteroid for drops while actively maneuvering.
       const asteroid = this.nearestAsteroid(self, view.asteroids, ASTEROID_FARM_RANGE);
       if (asteroid) {
         aimAngle = Math.atan2(asteroid.y - self.y, asteroid.x - self.x);
@@ -174,11 +188,38 @@ export class BotController {
           const steer = this.steerToward(self.x, self.y, asteroid.x, asteroid.y, 0.9);
           moveX += steer.x;
           moveY += steer.y;
+        } else {
+          // Circle/orbit around the asteroid instead of floating stationary
+          const orbitAngle =
+            Math.atan2(self.y - asteroid.y, self.x - asteroid.x) +
+            (Math.PI / 2) * this.orbitSign;
+          moveX += Math.cos(orbitAngle) * 0.7;
+          moveY += Math.sin(orbitAngle) * 0.7;
         }
-      } else if (zoneDist > zone.radius * 0.5) {
-        // Idle drift back toward the middle of the zone.
-        moveX += (zoneDx / zoneDist) * 0.8;
-        moveY += (zoneDy / zoneDist) * 0.8;
+      } else {
+        // Active patrol cruise inside safe zone: orbit or sweep the sector so it never sits idle
+        const patrolAngle =
+          Math.atan2(self.y - zone.centerY, self.x - zone.centerX) +
+          (Math.PI / 2) * this.orbitSign;
+        moveX += Math.cos(patrolAngle) * 0.8 + (zoneDx / zoneDist) * 0.3;
+        moveY += Math.sin(patrolAngle) * 0.8 + (zoneDy / zoneDist) * 0.3;
+        aimAngle = Math.atan2(moveY, moveX);
+      }
+    }
+
+    // ── Guaranteed Active Movement ───────────────────────────────────────
+    // Ensure the bot NEVER stays idle or motionless if nothing is nearby.
+    const currentLen = Math.hypot(moveX, moveY);
+    if (currentLen < KEY_THRESHOLD) {
+      const patrolAngle =
+        zoneDist > 60
+          ? Math.atan2(self.y - zone.centerY, self.x - zone.centerX) +
+            (Math.PI / 2) * this.orbitSign
+          : self.rotation;
+      moveX += Math.cos(patrolAngle);
+      moveY += Math.sin(patrolAngle);
+      if (!shooting && (!enemy || enemyDist > effectiveEngageRange)) {
+        aimAngle = patrolAngle;
       }
     }
 

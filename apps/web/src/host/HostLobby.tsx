@@ -128,7 +128,7 @@ export const HostLobby: React.FC<HostLobbyProps> = ({
                 />
                 <span className="host-roster-name">{p.displayName}</span>
                 <span className="host-roster-meta">
-                  {p.isBot ? 'AI PILOT' : p.isConnected ? SHIP_COLOR_NAMES[p.colorIndex] : 'reconnecting…'}
+                  {p.isBot ? 'BOT' : p.isConnected ? SHIP_COLOR_NAMES[p.colorIndex] : 'reconnecting…'}
                 </span>
               </li>
             ))}

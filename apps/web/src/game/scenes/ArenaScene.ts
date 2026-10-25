@@ -1050,21 +1050,37 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private updateSafeZone(zone: SafeZoneState): void {
-    this.safeZoneGraphics.clear();
-    const color = zone.isShrinking ? NEON.storm : NEON.safeZone;
-    this.safeZoneGraphics.lineStyle(6, Phaser.Display.Color.HexStringToColor(color).color, 0.8);
-    this.safeZoneGraphics.strokeCircle(zone.centerX, zone.centerY, zone.radius);
-    // Danger overlay outside the safe zone using an outer ring stroke
-    const maxArenaRadius = Math.hypot(ARENA_WIDTH, ARENA_HEIGHT);
-    if (zone.radius < maxArenaRadius) {
-      const stormThickness = maxArenaRadius - zone.radius;
-      this.safeZoneGraphics.lineStyle(stormThickness, 0xf43f5e, 0.07);
-      this.safeZoneGraphics.strokeCircle(
-        zone.centerX,
-        zone.centerY,
-        zone.radius + stormThickness / 2,
-      );
+    const g = this.safeZoneGraphics;
+    g.clear();
+    const cx = zone.centerX;
+    const cy = zone.centerY;
+    const radius = zone.radius;
+    const color = Phaser.Display.Color.HexStringToColor(zone.isShrinking ? NEON.storm : NEON.safeZone).color;
+
+    // Danger wash outside the ring. Stroking a circle with a huge line width
+    // produces radial spoke artifacts, so fill a proper annulus polygon instead.
+    const outerRadius = Math.hypot(ARENA_WIDTH, ARENA_HEIGHT) + 64;
+    if (radius < outerRadius) {
+      const segments = 96;
+      const innerRadius = Math.max(radius, 0.5);
+      const ring: { x: number; y: number }[] = [];
+      for (let i = 0; i <= segments; i++) {
+        const a = (i / segments) * Math.PI * 2;
+        ring.push({ x: cx + Math.cos(a) * outerRadius, y: cy + Math.sin(a) * outerRadius });
+      }
+      for (let i = segments; i >= 0; i--) {
+        const a = (i / segments) * Math.PI * 2;
+        ring.push({ x: cx + Math.cos(a) * innerRadius, y: cy + Math.sin(a) * innerRadius });
+      }
+      g.fillStyle(0xf43f5e, 0.12);
+      g.fillPoints(ring, true);
     }
+
+    // Soft glow + crisp ring stroke
+    g.lineStyle(16, color, 0.16);
+    g.strokeCircle(cx, cy, radius);
+    g.lineStyle(5, color, 0.9);
+    g.strokeCircle(cx, cy, radius);
   }
 
   // ── Explosions ────────────────────────────────────────────────────────────

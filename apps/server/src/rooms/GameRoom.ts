@@ -320,7 +320,7 @@ export class GameRoom {
       id: `bot-${this.code}-${index}`,
       token: null,
       socketId: null,
-      displayName: `${BOT_NAMES[index % BOT_NAMES.length]} [AI]`,
+      displayName: `${BOT_NAMES[index % BOT_NAMES.length]} [BOT]`,
       isBot: true,
       isConnected: true,
       colorIndex: this.nextFreeColorIndex(),

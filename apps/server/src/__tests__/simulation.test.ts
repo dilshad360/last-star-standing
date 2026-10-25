@@ -38,6 +38,7 @@ import {
   type SimulationHost,
   type SimulationRosterEntry,
 } from '../game/WorldSimulation.js';
+import { BotController } from '../game/BotController.js';
 
 // ── Deterministic RNG (mulberry32) ───────────────────────────────────────────
 function mulberry32(seed: number): () => number {
@@ -56,7 +57,7 @@ const BOT_NAMES = ['Vega', 'Orion', 'Lyra', 'Rigel', 'Altair', 'Sirius', 'Castor
 function botRoster(count: number): SimulationRosterEntry[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `bot-test-${i}`,
-    displayName: `${BOT_NAMES[i % BOT_NAMES.length]} [AI]`,
+    displayName: `${BOT_NAMES[i % BOT_NAMES.length]} [BOT]`,
     isBot: true,
     colorIndex: i,
   }));
@@ -558,3 +559,114 @@ describe('WorldSimulation — free-for-all resolution', () => {
     expect(host.controllerStates.has('bot-test-0')).toBe(false);
   });
 });
+
+// ── Bot AI Navigation & Anti-Idle ────────────────────────────────────────────
+describe('BotController — active movement and anti-idle', () => {
+  it('never stays idle or motionless when nothing is nearby', () => {
+    const bot = new BotController(() => 0.5);
+    const selfShip: ShipState = {
+      id: 'bot-0',
+      displayName: 'Vega [AI]',
+      isBot: true,
+      colorIndex: 0,
+      x: ARENA_CENTER_X,
+      y: ARENA_CENTER_Y,
+      velocityX: 0,
+      velocityY: 0,
+      rotation: 0,
+      health: SHIP_MAX_HEALTH,
+      maxHealth: SHIP_MAX_HEALTH,
+      alive: true,
+      kills: 0,
+      deaths: 0,
+      score: 0,
+      respawnAt: null,
+      spawnProtectedUntil: 0,
+      speedUpgradeUntil: 0,
+      tripleShotUntil: 0,
+      shieldUntil: 0,
+      connected: true,
+    };
+
+    const emptyView = {
+      now: 20_000,
+      ships: [selfShip],
+      asteroids: [],
+      pickups: [],
+      safeZone: {
+        stageIndex: 0,
+        stageName: 'Zone 1' as const,
+        centerX: ARENA_CENTER_X,
+        centerY: ARENA_CENTER_Y,
+        radius: SAFE_ZONE_INITIAL_RADIUS,
+        currentRadius: SAFE_ZONE_INITIAL_RADIUS,
+        damagePerSecond: STORM_DAMAGE_PER_SECOND,
+        timeUntilShrinkMs: 10_000,
+        isShrinking: false,
+      },
+    };
+
+    const input = bot.decide(selfShip, emptyView);
+    // Must engage at least one thruster — never sit idle!
+    const isMoving = input.up || input.down || input.left || input.right;
+    expect(isMoving).toBe(true);
+  });
+
+  it('hunts and pursues distant enemies instead of idling', () => {
+    const bot = new BotController(() => 0.5);
+    const selfShip: ShipState = {
+      id: 'bot-0',
+      displayName: 'Vega [AI]',
+      isBot: true,
+      colorIndex: 0,
+      x: ARENA_CENTER_X - 400,
+      y: ARENA_CENTER_Y,
+      velocityX: 0,
+      velocityY: 0,
+      rotation: 0,
+      health: SHIP_MAX_HEALTH,
+      maxHealth: SHIP_MAX_HEALTH,
+      alive: true,
+      kills: 0,
+      deaths: 0,
+      score: 0,
+      respawnAt: null,
+      spawnProtectedUntil: 0,
+      speedUpgradeUntil: 0,
+      tripleShotUntil: 0,
+      shieldUntil: 0,
+      connected: true,
+    };
+
+    const distantEnemy: ShipState = {
+      ...selfShip,
+      id: 'enemy-1',
+      displayName: 'Rival',
+      x: ARENA_CENTER_X + 400, // 800 units away (far beyond 520 ENGAGE_RANGE)
+      y: ARENA_CENTER_Y,
+    };
+
+    const view = {
+      now: 25_000,
+      ships: [selfShip, distantEnemy],
+      asteroids: [],
+      pickups: [],
+      safeZone: {
+        stageIndex: 0,
+        stageName: 'Zone 1' as const,
+        centerX: ARENA_CENTER_X,
+        centerY: ARENA_CENTER_Y,
+        radius: SAFE_ZONE_INITIAL_RADIUS,
+        currentRadius: SAFE_ZONE_INITIAL_RADIUS,
+        damagePerSecond: STORM_DAMAGE_PER_SECOND,
+        timeUntilShrinkMs: 10_000,
+        isShrinking: false,
+      },
+    };
+
+    const input = bot.decide(selfShip, view);
+    // Since enemy is at +X (right), bot should actively thrust right towards enemy
+    expect(input.right).toBe(true);
+  });
+});
+
