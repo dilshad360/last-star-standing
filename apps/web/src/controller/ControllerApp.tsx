@@ -119,11 +119,17 @@ export function ControllerApp() {
     return () => offs.forEach((off) => off());
   }, []);
 
-  // 30 Hz input stream while a round is running. Stops when the tab is hidden
+  const sendNow = useRef<(reliable: boolean) => void>(() => {});
+
+  // 30 Hz input stream while a round is running, plus an immediate reliable
+  // send on every Fire/Boost press or release. Stops when the tab is hidden
   // so the server's stale-input timeout releases the ship.
   useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => {
+    if (!active) {
+      sendNow.current = () => {};
+      return;
+    }
+    const send = (reliable: boolean) => {
       if (document.hidden) return;
       const v = tiltOn ? tilt.vector.current : stick.current;
       if (tiltDot.current) {
@@ -142,8 +148,10 @@ export function ControllerApp() {
         moveY: v.y,
         sequence: ++sequence.current,
       };
-      socketClient.sendInput(input);
-    }, INPUT_INTERVAL_MS);
+      socketClient.sendInput(input, reliable);
+    };
+    sendNow.current = send;
+    const id = window.setInterval(() => send(false), INPUT_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [active, tiltOn, tilt.vector]);
 
@@ -349,9 +357,11 @@ export function ControllerApp() {
         }}
         onFire={(isActive) => {
           fire.current = isActive;
+          sendNow.current(true);
         }}
         onBoost={(isActive) => {
           boost.current = isActive;
+          sendNow.current(true);
         }}
       />
     </div>

@@ -163,8 +163,14 @@ export class SocketClient {
     return this.emitWithAck('match:restart');
   }
 
-  sendInput(input: PlayerInput): void {
-    if (this.socket?.connected) this.socket.volatile.emit('input:update', input);
+  /**
+   * Streams input. Button presses/releases are sent `reliable` so they are
+   * never dropped; the 30 Hz stick stream is volatile (stale packets are useless).
+   */
+  sendInput(input: PlayerInput, reliable = false): void {
+    if (!this.socket?.connected) return;
+    if (reliable) this.socket.emit('input:update', input);
+    else this.socket.volatile.emit('input:update', input);
   }
 
   // ── Internals ────────────────────────────────────────────────────────────

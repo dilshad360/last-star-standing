@@ -339,9 +339,18 @@ describe('input validation', () => {
     const latest = server.roomManager.getRoom(code)!.getPlayer(joined.playerId)!.latestInput;
     expect(latest).toMatchObject({ moveX: 1, moveY: -1, shooting: true });
 
+    // A quick tap (press then release before the next tick) still fires once.
+    const room = server.roomManager.getRoom(code)!;
+    room.getFreshInput(joined.playerId);
+    phone.emit('input:update', { ...base, shooting: true, sequence: 10 });
+    phone.emit('input:update', { ...base, shooting: false, sequence: 11 });
+    await sleep(100);
+    expect(room.getFreshInput(joined.playerId)?.shooting).toBe(true);
+    expect(room.getFreshInput(joined.playerId)?.shooting).toBe(false);
+
     phone.emit('input:update', { ...base, aimAngle: Number.NaN, sequence: 2 });
     await sleep(100);
-    expect(server.roomManager.getRoom(code)!.getPlayer(joined.playerId)!.latestInput?.sequence).toBe(1);
+    expect(server.roomManager.getRoom(code)!.getPlayer(joined.playerId)!.latestInput?.sequence).toBe(11);
     host.disconnect();
     phone.disconnect();
   });

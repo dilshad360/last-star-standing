@@ -40,6 +40,8 @@ export interface RoomPlayer {
   colorIndex: number;
   latestInput: PlayerInput | null;
   latestInputAt: number;
+  /** A fire press seen since the last tick, so taps shorter than a tick still shoot. */
+  pendingShot: boolean;
 }
 
 /**
@@ -137,11 +139,19 @@ export class GameRoom {
     return this.humans.find((p) => p.token === token);
   }
 
-  /** Latest input, or null once it is older than INPUT_STALE_MS. */
+  /**
+   * Latest input for this tick, or null once it is older than INPUT_STALE_MS.
+   * Consumes any latched fire press so a quick tap between ticks still fires.
+   */
   getFreshInput(playerId: string, now = Date.now()): PlayerInput | null {
     const player = this.players.get(playerId);
     if (!player?.latestInput || !player.isConnected) return null;
-    return now - player.latestInputAt <= INPUT_STALE_MS ? player.latestInput : null;
+    if (now - player.latestInputAt > INPUT_STALE_MS) return null;
+    const input = player.pendingShot
+      ? { ...player.latestInput, shooting: true }
+      : player.latestInput;
+    player.pendingShot = false;
+    return input;
   }
 
   toRoomInfo(): RoomInfo {
@@ -246,6 +256,7 @@ export class GameRoom {
       colorIndex: this.nextFreeColorIndex(),
       latestInput: null,
       latestInputAt: 0,
+      pendingShot: false,
     };
     this.players.set(player.id, roomPlayer);
     return { ok: true, player: roomPlayer };
@@ -288,6 +299,7 @@ export class GameRoom {
     if (!player || player.isBot) return;
     player.latestInput = input;
     player.latestInputAt = now;
+    if (input.shooting) player.pendingShot = true;
   }
 
   // ── AI Bot Pilots ────────────────────────────────────────────────────────
@@ -314,6 +326,7 @@ export class GameRoom {
       colorIndex: this.nextFreeColorIndex(),
       latestInput: null,
       latestInputAt: 0,
+      pendingShot: false,
     };
     this.players.set(bot.id, bot);
   }

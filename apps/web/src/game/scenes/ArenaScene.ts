@@ -36,6 +36,9 @@ interface InterpolatedShip {
   lastUpdate: number;
   color: number;
   speed: number;
+  /** Latest server velocity, used to extrapolate between 25 Hz snapshots. */
+  velocityX?: number;
+  velocityY?: number;
   alive: boolean;
   hasShield: boolean;
   spawnProtectedUntil: number;
@@ -87,8 +90,13 @@ interface InterpolatedPickup {
   graphics: Phaser.GameObjects.Container;
 }
 
-const INTERPOLATION_DELAY_MS = 100; // Render 100ms behind server time
+const INTERPOLATION_DELAY_MS = 100;
 const LERP_FACTOR = 0.2;
+/** Ship smoothing time constants: small enough that a ship's nose and its shots line up. */
+const SHIP_POSITION_SMOOTH_MS = 45;
+const SHIP_ROTATION_SMOOTH_MS = 30;
+/** Never extrapolate further than this past the last snapshot. */
+const SHIP_MAX_EXTRAPOLATION_MS = 80;
 /** Host-screen camera: keep every living ship in frame. */
 const CAMERA_PADDING = 260;
 const CAMERA_MIN_ZOOM_SPAN = 900;
@@ -528,6 +536,8 @@ export class ArenaScene extends Phaser.Scene {
 
   private updateShipVisuals(ship: InterpolatedShip, player: PlayerState): void {
     ship.speed = Math.hypot(player.velocityX, player.velocityY);
+    ship.velocityX = player.velocityX;
+    ship.velocityY = player.velocityY;
     ship.alive = player.alive;
     ship.hasShield = player.shield > 0;
     ship.spawnProtectedUntil = player.spawnProtectedUntil;
@@ -1110,11 +1120,16 @@ export class ArenaScene extends Phaser.Scene {
   // ── Interpolation & Local Prediction ──────────────────────────────────────
 
   private interpolateShips(delta: number): void {
-    const factor = Math.min(1, delta / INTERPOLATION_DELAY_MS) * LERP_FACTOR;
+    const now = Date.now();
+    const posFactor = 1 - Math.exp(-delta / SHIP_POSITION_SMOOTH_MS);
+    const rotFactor = 1 - Math.exp(-delta / SHIP_ROTATION_SMOOTH_MS);
     for (const ship of this.ships.values()) {
-      ship.x = Phaser.Math.Linear(ship.x, ship.targetX, factor);
-      ship.y = Phaser.Math.Linear(ship.y, ship.targetY, factor);
-      ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, factor);
+      const ahead = Math.min(now - ship.lastUpdate, SHIP_MAX_EXTRAPOLATION_MS) / 1000;
+      const goalX = ship.targetX + (ship.velocityX ?? 0) * ahead;
+      const goalY = ship.targetY + (ship.velocityY ?? 0) * ahead;
+      ship.x = Phaser.Math.Linear(ship.x, goalX, posFactor);
+      ship.y = Phaser.Math.Linear(ship.y, goalY, posFactor);
+      ship.rotation = this.lerpAngle(ship.rotation, ship.targetRotation, rotFactor);
       ship.graphics.setPosition(ship.x, ship.y);
       ship.shipVisualContainer.setRotation(ship.rotation);
     }

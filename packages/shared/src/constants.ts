@@ -108,7 +108,7 @@ export const SAFE_ZONE_SHRINKS = false;
 
 // ── Phone controllers ────────────────────────────────────────────────────────
 /** Ships turn toward the analog stick direction at this rate (rad/s). */
-export const ANALOG_TURN_SPEED = 9;
+export const ANALOG_TURN_SPEED = 14;
 export const ANALOG_DEADZONE = 0.18;
 /** Phone tilt (degrees from the calibrated pose) that maps to full stick deflection. */
 export const TILT_MAX_DEGREES = 25;
