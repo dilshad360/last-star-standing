@@ -97,10 +97,10 @@ const SHIP_POSITION_SMOOTH_MS = 45;
 const SHIP_ROTATION_SMOOTH_MS = 30;
 /** Never extrapolate further than this past the last snapshot. */
 const SHIP_MAX_EXTRAPOLATION_MS = 80;
-/** Host-screen camera: keep every living ship in frame. */
-const CAMERA_PADDING = 260;
-const CAMERA_MIN_ZOOM_SPAN = 900;
-const CAMERA_LERP = 0.04;
+const CAMERA_PADDING = 140;
+const CAMERA_MIN_ZOOM_SPAN = 600;
+const CAMERA_MAX_ZOOM = 1.25;
+const CAMERA_LERP = 0.05;
 
 /**
  * Host-screen arena: renders the 2400×2400 neon arena with procedural
@@ -202,7 +202,7 @@ export class ArenaScene extends Phaser.Scene {
     // Detach DOM listeners and EventBus subs on every scene restart/shutdown.
     this.events.once('shutdown', this.shutdown, this);
 
-    // Camera setup - center immediately on arena center to avoid void in top-left
+    // Camera setup - frame arena center on initial load
     this.cameras.main.setBounds(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
     this.cameras.main.setZoom(this.fitZoom(ARENA_WIDTH, ARENA_HEIGHT));
     this.cameras.main.centerOn(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
@@ -241,36 +241,37 @@ export class ArenaScene extends Phaser.Scene {
   // ── Snapshot processing ───────────────────────────────────────────────────
 
   private processSnapshot(snapshot: GameSnapshot): void {
-    if (!this.scene?.isActive() || !this.add) return;
-    const now = Date.now();
-    const seenPlayers = new Set<string>();
+    if (!this.sys?.isActive() || !this.add) return;
+    try {
+      const now = Date.now();
+      const seenPlayers = new Set<string>();
 
-    // Update ships
-    for (const player of snapshot.players) {
-      seenPlayers.add(player.id);
-      let ship = this.ships.get(player.id);
-      if (!ship) {
-        ship = this.createShip(player);
-        this.ships.set(player.id, ship);
+      // Update ships
+      for (const player of snapshot.players) {
+        seenPlayers.add(player.id);
+        let ship = this.ships.get(player.id);
+        if (!ship) {
+          ship = this.createShip(player);
+          this.ships.set(player.id, ship);
+        }
+        const respawned = !ship.alive && player.alive;
+        ship.prevX = ship.x;
+        ship.prevY = ship.y;
+        ship.prevRotation = ship.rotation;
+        ship.targetX = player.x;
+        ship.targetY = player.y;
+        ship.targetRotation = player.rotation;
+        ship.lastUpdate = now;
+        if (respawned) {
+          // Teleport instead of sliding across the arena from the death spot.
+          ship.x = player.x;
+          ship.y = player.y;
+          ship.rotation = player.rotation;
+          ship.graphics.setPosition(ship.x, ship.y);
+          ship.shipVisualContainer.setRotation(ship.rotation);
+        }
+        this.updateShipVisuals(ship, player);
       }
-      const respawned = !ship.alive && player.alive;
-      ship.prevX = ship.x;
-      ship.prevY = ship.y;
-      ship.prevRotation = ship.rotation;
-      ship.targetX = player.x;
-      ship.targetY = player.y;
-      ship.targetRotation = player.rotation;
-      ship.lastUpdate = now;
-      if (respawned) {
-        // Teleport instead of sliding across the arena from the death spot.
-        ship.x = player.x;
-        ship.y = player.y;
-        ship.rotation = player.rotation;
-        ship.graphics.setPosition(ship.x, ship.y);
-        ship.shipVisualContainer.setRotation(ship.rotation);
-      }
-      this.updateShipVisuals(ship, player);
-    }
 
     // Clean up removed/disconnected ships
     for (const [id, ship] of this.ships) {
@@ -346,15 +347,17 @@ export class ArenaScene extends Phaser.Scene {
 
     // Update safe zone
     this.updateSafeZone(snapshot.safeZone);
+    } catch (err) {
+      console.error('[ArenaScene] error in processSnapshot:', err);
+    }
   }
 
   // ── Ship creation & visuals ───────────────────────────────────────────────
 
   private createShip(player: PlayerState): InterpolatedShip {
-    const colorHex = SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!;
-    const color = Phaser.Display.Color.HexStringToColor(
-      SHIP_COLORS[player.colorIndex % SHIP_COLORS.length]!,
-    ).color;
+    const colorIdx = Math.abs(player.colorIndex ?? 0) % SHIP_COLORS.length;
+    const colorHex = SHIP_COLORS[colorIdx] ?? '#22d3ee';
+    const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
 
     // Clean simple procedural neon spaceship hull
     const hullGraphics = this.add.graphics();
@@ -1182,24 +1185,28 @@ export class ArenaScene extends Phaser.Scene {
     return Math.min(cam.width / spanX, cam.height / spanY);
   }
 
-  /** Smoothly frames the bounding box of all living ships (whole arena when none). */
+  /** Smoothly frames all living combatants so no ship is ever cut off */
   private updateCamera(): void {
     const cam = this.cameras.main;
     const alive = [...this.ships.values()].filter((s) => s.alive);
+
     let minX = 0;
     let minY = 0;
     let maxX = ARENA_WIDTH;
     let maxY = ARENA_HEIGHT;
+
     if (alive.length > 0) {
       minX = Math.min(...alive.map((s) => s.x)) - CAMERA_PADDING;
       maxX = Math.max(...alive.map((s) => s.x)) + CAMERA_PADDING;
       minY = Math.min(...alive.map((s) => s.y)) - CAMERA_PADDING;
       maxY = Math.max(...alive.map((s) => s.y)) + CAMERA_PADDING;
     }
+
     const spanX = Math.min(ARENA_WIDTH, Math.max(CAMERA_MIN_ZOOM_SPAN, maxX - minX));
     const spanY = Math.min(ARENA_HEIGHT, Math.max(CAMERA_MIN_ZOOM_SPAN, maxY - minY));
     const minZoom = this.fitZoom(ARENA_WIDTH, ARENA_HEIGHT);
-    const targetZoom = Math.max(minZoom, this.fitZoom(spanX, spanY));
+    const targetZoom = Math.min(CAMERA_MAX_ZOOM, Math.max(minZoom, this.fitZoom(spanX, spanY)));
+
     cam.setZoom(Phaser.Math.Linear(cam.zoom, targetZoom, CAMERA_LERP));
     const centerX = cam.midPoint.x;
     const centerY = cam.midPoint.y;

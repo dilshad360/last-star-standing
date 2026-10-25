@@ -170,6 +170,84 @@ export class SoundManager {
     });
   }
 
+  /** Subtle UI element hover beep. */
+  playUiHover(): void {
+    this.playTone({
+      frequency: 1100,
+      frequencyEnd: 1300,
+      duration: 0.04,
+      type: 'sine',
+      volume: 0.05,
+    });
+  }
+
+  /** Tactical button click chirp. */
+  playUiClick(): void {
+    this.playTone({
+      frequency: 650,
+      frequencyEnd: 920,
+      duration: 0.06,
+      type: 'sine',
+      volume: 0.12,
+    });
+  }
+
+  /** Epic arena start power-up sound. */
+  playUiStart(): void {
+    const freqs = [320, 480, 640, 960];
+    freqs.forEach((freq, i) => {
+      setTimeout(() => {
+        this.playTone({
+          frequency: freq,
+          frequencyEnd: freq * 1.3,
+          duration: 0.12,
+          type: 'sawtooth',
+          volume: 0.12,
+        });
+      }, i * 70);
+    });
+  }
+
+  private ambientOsc: OscillatorNode | null = null;
+  private ambientGain: GainNode | null = null;
+
+  /** Ambient deep-space cockpit hum. */
+  startAmbientDrone(): void {
+    if (this.ambientOsc || !this.ctx || this.muted) return;
+    try {
+      this.ambientOsc = this.ctx.createOscillator();
+      this.ambientGain = this.ctx.createGain();
+      this.ambientOsc.type = 'triangle';
+      this.ambientOsc.frequency.setValueAtTime(55, this.ctx.currentTime); // Low A
+
+      // Low pass filter to make it a gentle distant cosmic hum
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 180;
+
+      this.ambientGain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+      this.ambientOsc.connect(filter);
+      filter.connect(this.ambientGain);
+      if (this.masterGain) {
+        this.ambientGain.connect(this.masterGain);
+      }
+      this.ambientOsc.start();
+    } catch {
+      // AudioContext might still be initializing
+    }
+  }
+
+  stopAmbientDrone(): void {
+    if (this.ambientOsc) {
+      try {
+        this.ambientOsc.stop();
+        this.ambientOsc.disconnect();
+      } catch {}
+      this.ambientOsc = null;
+      this.ambientGain = null;
+    }
+  }
+
   // ── Synthesis primitives ──────────────────────────────────────────────────
 
   private playTone(opts: {

@@ -9,7 +9,6 @@ import { socketClient } from '../networking/SocketClient.js';
 import { gameEvents } from '../game/EventBus.js';
 import { ConnectionBanner } from '../components/ConnectionBanner.js';
 import { TouchControls } from '../components/TouchControls.js';
-import { useTilt } from './useTilt.js';
 import { useWakeLock } from './useWakeLock.js';
 import { vibrate } from './haptics.js';
 
@@ -33,7 +32,7 @@ function requestFullscreen(): void {
   }
 }
 
-/** The phone: join a room, then act as a joystick/tilt gamepad for one ship. */
+/** The phone: join a room, then act as a button/joystick gamepad for one ship. */
 export function ControllerApp() {
   const [code, setCode] = useState(initialCode);
   const [name, setName] = useState(defaultName);
@@ -46,15 +45,12 @@ export function ControllerApp() {
   const [connected, setConnected] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
-  const [tiltOn, setTiltOn] = useState(false);
   const [, forceTick] = useState(0);
 
-  const tilt = useTilt(tiltOn);
   const stick = useRef({ x: 0, y: 0 });
   const fire = useRef(false);
   const boost = useRef(false);
   const sequence = useRef(0);
-  const tiltDot = useRef<HTMLDivElement>(null);
 
   const me = room?.players.find((p) => p.id === playerId) ?? null;
   const color = me ? SHIP_COLORS[me.colorIndex]! : '#22d3ee';
@@ -131,10 +127,7 @@ export function ControllerApp() {
     }
     const send = (reliable: boolean) => {
       if (document.hidden) return;
-      const v = tiltOn ? tilt.vector.current : stick.current;
-      if (tiltDot.current) {
-        tiltDot.current.style.transform = `translate(${v.x * 40}px, ${v.y * 40}px)`;
-      }
+      const v = stick.current;
       const input: PlayerInput = {
         up: false,
         down: false,
@@ -153,27 +146,13 @@ export function ControllerApp() {
     sendNow.current = send;
     const id = window.setInterval(() => send(false), INPUT_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [active, tiltOn, tilt.vector]);
+  }, [active]);
 
   // Re-render once a second for countdown / respawn timers.
   useEffect(() => {
     const id = window.setInterval(() => forceTick((n) => n + 1), 250);
     return () => window.clearInterval(id);
   }, []);
-
-  const enableTilt = async () => {
-    if (tiltOn) {
-      setTiltOn(false);
-      return;
-    }
-    const granted = tilt.permission === 'granted' || (await tilt.request());
-    if (granted) {
-      setTiltOn(true);
-      tilt.calibrate();
-    } else {
-      setError('Tilt needs motion permission and an HTTPS page. Using the joystick instead.');
-    }
-  };
 
   const leave = async () => {
     await socketClient.leaveRoom().catch(() => {});
@@ -277,16 +256,6 @@ export function ControllerApp() {
             </p>
           </>
         )}
-        <div className="controller-tilt-setup">
-          <button type="button" className="btn-neon-outline" onClick={enableTilt}>
-            {tiltOn ? 'Tilt steering: ON' : 'Use tilt steering'}
-          </button>
-          {tiltOn && (
-            <button type="button" className="btn-neon-outline" onClick={tilt.calibrate}>
-              Calibrate (hold phone level)
-            </button>
-          )}
-        </div>
         <p className="controller-muted controller-small">Turn your phone sideways for the best grip.</p>
         <button type="button" className="btn-neon-outline" onClick={leave}>
           Leave
@@ -319,21 +288,7 @@ export function ControllerApp() {
         <span>
           {Math.floor(clock / 60)}:{String(clock % 60).padStart(2, '0')}
         </span>
-        <button type="button" className="btn-neon-outline controller-tilt-toggle" onClick={enableTilt}>
-          {tiltOn ? 'Tilt ON' : 'Tilt'}
-        </button>
-        {tiltOn && (
-          <button type="button" className="btn-neon-outline controller-tilt-toggle" onClick={tilt.calibrate}>
-            Recenter
-          </button>
-        )}
       </div>
-
-      {tiltOn && (
-        <div className="controller-tilt-indicator" style={{ borderColor: color }}>
-          <div ref={tiltDot} style={{ background: color }} />
-        </div>
-      )}
 
       {state && !state.alive && (
         <div className="controller-respawn">
@@ -350,7 +305,6 @@ export function ControllerApp() {
       )}
 
       <TouchControls
-        hideJoystick={tiltOn}
         accentColor={color}
         onJoystick={(x, y, isActive) => {
           stick.current = isActive ? { x, y } : { x: 0, y: 0 };

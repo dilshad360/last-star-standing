@@ -8,6 +8,7 @@ import { ConnectionBanner } from '../components/ConnectionBanner.js';
 import { HostLobby, CountdownOverlay } from './HostLobby.js';
 import { TvHud } from './TvHud.js';
 import { HostResults } from './HostResults.js';
+import { HostLanding } from './HostLanding.js';
 
 const HUD_UPDATE_MS = 200;
 
@@ -135,16 +136,12 @@ export function HostApp() {
       <ConnectionBanner connected={connected} error={error} onDismissError={() => setError(null)} />
 
       {!room && (
-        <div className="host-screen host-landing">
-          <h1 className="title-glow host-title">LAST STAR STANDING</h1>
-          <p className="host-tagline">
-            Put this screen on the TV. Everyone scans the QR code and flies a ship from their phone.
-          </p>
-          <button type="button" className="btn-neon-cyan host-start" disabled={loading} onClick={hostGame}>
-            {loading ? 'Opening room…' : 'HOST A GAME'}
-          </button>
-          <JoinWithCode />
-        </div>
+        <HostLanding
+          loading={loading}
+          onHostGame={hostGame}
+          muted={muted}
+          onToggleMute={toggleMute}
+        />
       )}
 
       {room && (room.status === 'LOBBY' || room.status === 'COUNTDOWN') && (
@@ -183,29 +180,5 @@ export function HostApp() {
         />
       )}
     </div>
-  );
-}
-
-function JoinWithCode() {
-  const [code, setCode] = useState('');
-  return (
-    <form
-      className="host-join-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (code.trim().length === 4) window.location.href = `/play?room=${code.trim().toUpperCase()}`;
-      }}
-    >
-      <span>Joining a game on this device?</span>
-      <input
-        value={code}
-        onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 4))}
-        placeholder="CODE"
-        aria-label="Room code"
-      />
-      <button type="submit" className="btn-neon-outline" disabled={code.trim().length !== 4}>
-        Join
-      </button>
-    </form>
   );
 }

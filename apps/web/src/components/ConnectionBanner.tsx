@@ -1,4 +1,5 @@
 import React from 'react';
+import { AlertTriangleIcon, XIcon } from './icons.js';
 
 interface ConnectionBannerProps {
   connected: boolean;
@@ -35,8 +36,8 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
             gap: 10,
           }}
         >
-          <span style={{ fontSize: 16 }}>⚠️</span>
-          <span>RECONNECTING TO QUANTUM SERVER GRID...</span>
+          <AlertTriangleIcon size={16} />
+          <span>RECONNECTING TO SERVER...</span>
         </div>
       )}
 
@@ -70,11 +71,13 @@ export const ConnectionBanner: React.FC<ConnectionBannerProps> = ({
                 border: 'none',
                 color: '#fff',
                 cursor: 'pointer',
-                fontWeight: 'bold',
-                fontSize: 14,
+                display: 'flex',
+                alignItems: 'center',
+                padding: 0,
               }}
+              aria-label="Dismiss error"
             >
-              ✕
+              <XIcon size={14} />
             </button>
           )}
         </div>
